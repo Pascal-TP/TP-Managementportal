@@ -144,14 +144,18 @@ const fullNav = [
   ["documents", "▤", "Dokumentenregister"],
   ["workflow", "✓", "Freigaben & Aufgaben"],
   ["deadlines", "◷", "Fristen & Wiedervorlagen"],
-  ["areas", "▣", "Bereiche & Informationen"],
+  ["areas", "▣", "Öffentliche Bereiche"],
+  ["myfiles", "▱", "Meine Dateien"],
+  ["shared", "♧", "Für mich freigegeben"],
   ["companies", "⌂", "Unternehmen"],
   ["archive", "▱", "Archiv / Historie"],
-  ["users", "♙", "Benutzer & Rechte"],
-];
+  ];
 const employeeNav = [
   ["dashboard", "▦", "Dashboard"],
   ["documents", "▤", "Dokumentenregister"],
+  ["areas", "▣", "Öffentliche Bereiche"],
+  ["myfiles", "▱", "Meine Dateien"],
+  ["shared", "♧", "Für mich freigegeben"],
 ];
 const employeeTypes = [
   "Arbeitsanweisung",
@@ -162,7 +166,7 @@ const employeeTypes = [
   "Sicherheitsdatenblatt",
 ];
 let current = "dashboard";
-let demoView = "full";
+let portalView = "full";
 const content = document.querySelector("#content"),
   title = document.querySelector("#page-title"),
   subtitle = document.querySelector("#page-subtitle"),
@@ -193,7 +197,7 @@ function status(s) {
   return `<span class="badge ${c}"><i class="dot"></i>${s}</span>`;
 }
 function initNav() {
-  const nav = demoView === "employee" ? employeeNav : fullNav;
+  const nav = portalView === "employee" ? employeeNav : fullNav;
   document.querySelector("#main-nav").innerHTML = nav
     .map(
       ([id, ic, l]) =>
@@ -209,14 +213,12 @@ function setHead(t, s) {
   subtitle.textContent = s;
 }
 function render(page) {
-  if (demoView === "employee" && !employeeNav.some((x) => x[0] === page))
+  if (portalView === "employee" && !employeeNav.some((x) => x[0] === page))
     page = "dashboard";
   current = page;
   initNav();
-  if (demoView === "employee") {
-    (page === "documents"
-      ? renderEmployeeDocuments
-      : renderEmployeeDashboard)();
+  if (portalView === "employee") {
+    ({ dashboard: renderEmployeeDashboard, documents: renderEmployeeDocuments, areas: renderAreas, myfiles: renderMyFiles, shared: renderShared }[page] || renderEmployeeDashboard)();
   } else {
     (
       ({
@@ -227,7 +229,8 @@ function render(page) {
         areas: renderAreas,
         companies: renderCompanies,
         archive: renderArchive,
-        users: renderUsers,
+        myfiles: renderMyFiles,
+        shared: renderShared,
         settings: renderSettings,
       })[page] || renderDashboard
     )();
@@ -240,7 +243,7 @@ function renderDashboard() {
     "Zentrale Übersicht des integrierten Managementsystems.",
   );
   content.innerHTML = `
-<div class="info-strip"><strong>Demo:</strong> Das Portal zeigt beispielhaft, wie Dokumentenlenkung, Freigaben, Wiedervorlagen und unternehmensübergreifende Filterung in einer zentralen Anwendung aussehen können.</div>
+
 <div class="kpi-grid"><div class="kpi"><span>Gültige Dokumente</span><strong>126</strong><small>davon 38 Arbeitsanweisungen</small></div><div class="kpi warn"><span>Offene Freigaben</span><strong>7</strong><small>3 Aufgaben sind Ihnen zugeordnet</small></div><div class="kpi bad"><span>Fristen & Wiedervorlagen</span><strong>5</strong><small>innerhalb der nächsten 30 Tage</small></div><div class="kpi"><span>Unternehmen</span><strong>4</strong><small>zentral verwaltet und filterbar</small></div></div>
 <div class="two-col"><div class="card"><div class="card-head"><div><h2>Meine offenen Aufgaben</h2><p>Prüfungen, Freigaben und Wiedervorlagen.</p></div><button class="btn secondary small" onclick="render('workflow')">Alle Aufgaben</button></div><div class="task-list">
 ${task("📝", "Homeoffice-Regelung prüfen", "RL.003.01 · Version 1.2", "Heute", "bad")}${task("⏰", "Steuerbefreiung prüfen", "HH-TP 417 · Befristung läuft aus", "21 Tage", "warn")}${task("✓", "Wareneingangsprüfung freigeben", "AA.031.02 · Version 2.3", "5 Tage", "warn")}</div></div>
@@ -345,44 +348,37 @@ function renderWorkflow() {
     "Freigaben & Aufgaben",
     "Dokumente nachvollziehbar prüfen, freigeben oder zurückgeben.",
   );
-  content.innerHTML = `<div class="kpi-grid"><div class="kpi warn"><span>Meine Prüfungen</span><strong>3</strong><small>davon 1 heute fällig</small></div><div class="kpi"><span>Meine Freigaben</span><strong>2</strong><small>noch nicht abgeschlossen</small></div><div class="kpi"><span>Zurückgegeben</span><strong>1</strong><small>mit Kommentar</small></div><div class="kpi"><span>Diese Woche erledigt</span><strong>9</strong><small>vollständig protokolliert</small></div></div><div class="card"><div class="card-head"><div><h2>Beispiel: Dokumentenfreigabe</h2><p>VA.018.04 · Fremdfirmenmanagement · Version 2.0</p></div>${status("In Prüfung")}</div><div class="workflow"><div class="workflow-step done">1. Entwurf<br><strong>erstellt</strong></div><div class="workflow-step done">2. Fachprüfung<br><strong>abgeschlossen</strong></div><div class="workflow-step active">3. IMS-Prüfung<br><strong>offen</strong></div><div class="workflow-step">4. Freigabe<br><strong>Geschäftsführung</strong></div><div class="workflow-step">5. Veröffentlichung<br><strong>automatisch</strong></div></div><div class="actions" style="margin-top:16px"><button class="btn" onclick="toast('Demo: Dokument wurde freigegeben und an die nächste Stufe weitergeleitet.')">✓ Prüfen & weiterleiten</button><button class="btn danger" onclick="toast('Demo: Dokument wurde mit Kommentar an den Ersteller zurückgegeben.')">Zurückgeben</button><button class="btn secondary" onclick="openDoc('VA.004.03')">Dokument anzeigen</button></div></div><div class="card"><div class="card-head"><div><h2>Offene Aufgaben</h2><p>Aufgaben werden rollen- und zuständigkeitsbezogen angezeigt.</p></div></div><div class="task-list">${task("📝", "RL.003.01 – Homeoffice-Regelung", "Fachprüfung durch Personal / IMS", "Heute", "bad")}${task("✅", "AA.031.02 – Wareneingangsprüfung", "Freigabe durch Bereichsleitung", "02.09.2026", "warn")}${task("📄", "VA.018.04 – Fremdfirmenmanagement", "IMS-Prüfung", "04.09.2026", "warn")}</div></div>`;
+  content.innerHTML = `<div class="kpi-grid"><div class="kpi warn"><span>Meine Prüfungen</span><strong>3</strong><small>davon 1 heute fällig</small></div><div class="kpi"><span>Meine Freigaben</span><strong>2</strong><small>noch nicht abgeschlossen</small></div><div class="kpi"><span>Zurückgegeben</span><strong>1</strong><small>mit Kommentar</small></div><div class="kpi"><span>Diese Woche erledigt</span><strong>9</strong><small>vollständig protokolliert</small></div></div><div class="card"><div class="card-head"><div><h2>Dokumentenfreigabe</h2><p>VA.018.04 · Fremdfirmenmanagement · Version 2.0</p></div>${status("In Prüfung")}</div><div class="workflow"><div class="workflow-step done">1. Entwurf<br><strong>erstellt</strong></div><div class="workflow-step done">2. Fachprüfung<br><strong>abgeschlossen</strong></div><div class="workflow-step active">3. IMS-Prüfung<br><strong>offen</strong></div><div class="workflow-step">4. Freigabe<br><strong>Geschäftsführung</strong></div><div class="workflow-step">5. Veröffentlichung<br><strong>automatisch</strong></div></div><div class="actions" style="margin-top:16px"><button class="btn" onclick="toast('Dokument wurde freigegeben und an die nächste Stufe weitergeleitet.')">✓ Prüfen & weiterleiten</button><button class="btn danger" onclick="toast('Dokument wurde mit Kommentar an den Ersteller zurückgegeben.')">Zurückgeben</button><button class="btn secondary" onclick="openDoc('VA.004.03')">Dokument anzeigen</button></div></div><div class="card"><div class="card-head"><div><h2>Offene Aufgaben</h2><p>Aufgaben werden rollen- und zuständigkeitsbezogen angezeigt.</p></div></div><div class="task-list">${task("📝", "RL.003.01 – Homeoffice-Regelung", "Fachprüfung durch Personal / IMS", "Heute", "bad")}${task("✅", "AA.031.02 – Wareneingangsprüfung", "Freigabe durch Bereichsleitung", "02.09.2026", "warn")}${task("📄", "VA.018.04 – Fremdfirmenmanagement", "IMS-Prüfung", "04.09.2026", "warn")}</div></div>`;
 }
 function renderDeadlines() {
   setHead(
     "Fristen & Wiedervorlagen",
     "Befristungen und regelmäßige Prüfungen automatisch im Blick behalten.",
   );
-  content.innerHTML = `<div class="info-strip">Neben Dokumenten können hier auch <strong>befristete Bescheide, Steuerbefreiungen, Zertifikate, Verträge oder Genehmigungen</strong> überwacht werden. Erinnerungsstufen könnten z. B. 90, 60, 30 und 14 Tage vor Ablauf erfolgen.</div><div class="card"><div class="card-head"><div><h2>Aktive Wiedervorlagen</h2><p>Priorisiert nach Fälligkeit.</p></div><button class="btn" onclick="toast('Demo: Neue Wiedervorlage würde hier angelegt.')">+ Wiedervorlage</button></div><div class="task-list">${task("🚗", "Steuerbefreiung E-Fahrzeug HH-TP 417", "TP Holding GmbH · Fuhrpark · Verantwortlich: Fuhrparkmanagement", "18.09.2026", "bad")}${task("📑", "Rahmenvertrag Entsorgungsdienstleister", "TGA Systemtechnik GmbH · Einkauf", "30.09.2026", "bad")}${task("📜", "ISO 9001 Zertifikat", "Alle Unternehmen · Qualitätsmanagement", "31.12.2026", "warn")}${task("🦺", "VA.004.03 Arbeitsunfälle", "Alle Unternehmen · Arbeitssicherheit", "01.03.2027", "")}${task("🧪", "Gefahrstoffverzeichnis", "Norddeutsche Flächenheizsysteme GmbH · Arbeitssicherheit", "15.04.2027", "")}</div></div>`;
+  content.innerHTML = `<div class="info-strip">Neben Dokumenten können hier auch <strong>befristete Bescheide, Steuerbefreiungen, Zertifikate, Verträge oder Genehmigungen</strong> überwacht werden. Erinnerungsstufen könnten z. B. 90, 60, 30 und 14 Tage vor Ablauf erfolgen.</div><div class="card"><div class="card-head"><div><h2>Aktive Wiedervorlagen</h2><p>Priorisiert nach Fälligkeit.</p></div><button class="btn" onclick="toast('Neue Wiedervorlage angelegt.')">+ Wiedervorlage</button></div><div class="task-list">${task("🚗", "Steuerbefreiung E-Fahrzeug HH-TP 417", "TP Holding GmbH · Fuhrpark · Verantwortlich: Fuhrparkmanagement", "18.09.2026", "bad")}${task("📑", "Rahmenvertrag Entsorgungsdienstleister", "TGA Systemtechnik GmbH · Einkauf", "30.09.2026", "bad")}${task("📜", "ISO 9001 Zertifikat", "Alle Unternehmen · Qualitätsmanagement", "31.12.2026", "warn")}${task("🦺", "VA.004.03 Arbeitsunfälle", "Alle Unternehmen · Arbeitssicherheit", "01.03.2027", "")}${task("🧪", "Gefahrstoffverzeichnis", "Norddeutsche Flächenheizsysteme GmbH · Arbeitssicherheit", "15.04.2027", "")}</div></div>`;
 }
 function renderAreas() {
-  setHead(
-    "Bereiche & Informationen",
-    "Für Beschäftigte übersichtlich aufbereitete, freigegebene Informationen.",
-  );
-  const areas = [
-    [
-      "🦺",
-      "Arbeitssicherheit",
-      "Arbeitsanweisungen, Betriebsanweisungen, Gefahrstoffe",
-    ],
-    ["👥", "Personal", "Richtlinien, Formulare und interne Informationen"],
-    ["🚗", "Fuhrpark", "Führerscheinkontrolle, Fahrzeugregeln und Nachweise"],
-    ["🏢", "Gebäudetechnik", "Gebäude, Wartungen, Störungen und Energie"],
-    [
-      "📦",
-      "Einkauf / Lager",
-      "Prozesse, Wareneingang, Lieferanten und Formulare",
-    ],
-    ["⭐", "Qualitätsmanagement", "Prozesse, Zertifikate und IMS-Dokumente"],
-    ["💻", "IT & Datenschutz", "Richtlinien, Datenschutz und IT-Sicherheit"],
-    [
-      "📣",
-      "Unternehmensinfos",
-      "Ansprechpartner, Organigramm, Vorlagen, Präsentationen",
-    ],
-    ["🧾", "Formulare", "Schneller Zugriff auf aktuell freigegebene Formulare"],
+  setHead("Öffentliche Bereiche", "Zentrale Dateien und Informationen für alle Beschäftigten.");
+  const folders = [
+    ["📁", "Ansprechpartner", "Kontaktdaten und Zuständigkeiten"],
+    ["📁", "Arbeitssicherheit", "Informationen, Hinweise und Unterlagen"],
+    ["📁", "Doku-Management", "Allgemeine Dokumentation"],
+    ["📁", "Flyer_Unternehmenspräsentation", "Freigegebene Flyer und Präsentationen"],
+    ["📁", "Fotos", "Öffentlich bereitgestellte Unternehmensfotos"],
+    ["📁", "Geburtstagsliste", "Aktuelle Geburtstagsübersicht"],
+    ["📁", "Organigramm", "Organigramme des Unternehmensverbunds"],
+    ["📁", "Video", "Freigegebene Videos"],
+    ["📁", "Vorlagen & Layouts", "Word-, Excel- und Layoutvorlagen zum Download"]
   ];
-  content.innerHTML = `<div class="card"><div class="card-head"><div><h2>Mitarbeiterportal</h2><p>Beschäftigte sehen nur die für sie freigegebenen und relevanten Inhalte.</p></div></div><div class="area-grid">${areas.map((a) => `<div class="area-card" onclick="render('documents')"><div class="area-icon">${a[0]}</div><strong>${a[1]}</strong><span>${a[2]}</span></div>`).join("")}</div></div>`;
+  content.innerHTML = `<div class="card"><div class="card-head"><div><h2>Öffentlicher Bereich</h2><p>Die heute gemeinsam genutzten Inhalte werden zentral im TP-Managementportal bereitgestellt.</p></div>${portalView === "full" ? '<button class="btn" onclick="toast(\'Neuer Ordner kann angelegt werden.\')">+ Neuer Ordner</button>' : ''}</div><div class="folder-list">${folders.map(f => `<button class="folder-row" onclick="toast('Ordner ${f[1]} geöffnet.')"><span class="folder-icon">${f[0]}</span><span><strong>${f[1]}</strong><small>${f[2]}</small></span><span class="folder-arrow">›</span></button>`).join("")}</div></div>`;
+}
+function renderMyFiles() {
+  setHead("Meine Dateien", "Ihr persönlicher Arbeitsbereich im TP-Managementportal.");
+  content.innerHTML = `<div class="info-strip"><strong>Persönlicher Bereich:</strong> Auf diese Dateien und Ordner hat standardmäßig nur der angemeldete Mitarbeiter Zugriff.</div><div class="card"><div class="card-head"><div><h2>Meine Ordner</h2><p>Eigene Ordnerstruktur anlegen und Arbeitsdateien zentral speichern.</p></div><div class="actions"><button class="btn secondary" onclick="toast('Dateiauswahl geöffnet.')">↑ Datei hochladen</button><button class="btn" onclick="toast('Neuer persönlicher Ordner angelegt.')">+ Neuer Ordner</button></div></div><div class="folder-list">${[["Projekte","3 Ordner · 12 Dateien"],["Fuhrpark","2 Ordner · 4 Dateien"],["Formulare","7 Dateien"],["Sonstiges","5 Dateien"]].map(f=>`<button class="folder-row" onclick="toast('Ordner ${f[0]} geöffnet.')"><span class="folder-icon">📁</span><span><strong>${f[0]}</strong><small>${f[1]}</small></span><span class="folder-arrow">›</span></button>`).join('')}</div></div>`;
+}
+function renderShared() {
+  setHead("Für mich freigegeben", "Ordner und Dateien, die gezielt mit Ihnen geteilt wurden.");
+  content.innerHTML = `<div class="info-strip">Freigaben können für einzelne Personen vergeben werden. Unterordner übernehmen standardmäßig die Berechtigung des übergeordneten Ordners.</div><div class="card"><div class="card-head"><div><h2>Freigegebene Ordner</h2><p>Gemeinsame Arbeitsbereiche außerhalb des öffentlichen Bereichs.</p></div>${portalView === "full" ? '<button class="btn" onclick="toast(\'Freigabe kann verwaltet werden.\')">Freigaben verwalten</button>' : ''}</div><div class="folder-list">${[["Projekt Neubau Lagerhalle","Freigegeben für 4 Personen · Bearbeiten erlaubt"],["Fuhrpark – Jahresplanung","Freigegeben für 3 Personen · Bearbeiten erlaubt"],["IMS Projektunterlagen","Freigegeben für 5 Personen · Lesen erlaubt"]].map(f=>`<button class="folder-row" onclick="toast('Ordner ${f[0]} geöffnet.')"><span class="folder-icon">📁</span><span><strong>${f[0]}</strong><small>${f[1]}</small></span><span class="share-pill">Personenfreigabe</span><span class="folder-arrow">›</span></button>`).join('')}</div></div>`;
 }
 function renderCompanies() {
   setHead(
@@ -428,21 +424,21 @@ function renderSettings() {
 }
 function openDoc(id) {
   const d = docs.find((x) => x.id === id) || docs[0];
-  if (demoView === "employee") {
-    modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>${d.id} · ${esc(d.title)}</h2><p>${esc(d.type)} · Version ${d.version}</p></div><button class="close-btn" onclick="closeModal()">×</button></div><div class="detail-grid"><div class="detail-item"><span>Unternehmen</span><strong>${esc(d.company)}</strong></div><div class="detail-item"><span>Bereich</span><strong>${esc(d.area)}</strong></div><div class="detail-item"><span>Dokumentart</span><strong>${esc(d.type)}</strong></div><div class="detail-item"><span>Version</span><strong>${d.version}</strong></div></div><p style="font-size:12px;line-height:1.55">${esc(d.note)}</p><div class="employee-document-note">Es wird immer die aktuell freigegebene Version bereitgestellt.</div><div class="modal-footer"><button class="btn secondary" onclick="closeModal()">Schließen</button><button class="btn" onclick="toast('Demo: Das freigegebene PDF würde jetzt geöffnet.')">Dokument öffnen</button></div></div>`;
+  if (portalView === "employee") {
+    modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>${d.id} · ${esc(d.title)}</h2><p>${esc(d.type)} · Version ${d.version}</p></div><button class="close-btn" onclick="closeModal()">×</button></div><div class="detail-grid"><div class="detail-item"><span>Unternehmen</span><strong>${esc(d.company)}</strong></div><div class="detail-item"><span>Bereich</span><strong>${esc(d.area)}</strong></div><div class="detail-item"><span>Dokumentart</span><strong>${esc(d.type)}</strong></div><div class="detail-item"><span>Version</span><strong>${d.version}</strong></div></div><p style="font-size:12px;line-height:1.55">${esc(d.note)}</p><div class="employee-document-note">Es wird immer die aktuell freigegebene Version bereitgestellt.</div><div class="modal-footer"><button class="btn secondary" onclick="closeModal()">Schließen</button><button class="btn" onclick="toast('Dokument wird geöffnet.')">Dokument öffnen</button></div></div>`;
   } else {
-    modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>${d.id} · ${esc(d.title)}</h2><p>${esc(d.type)} · Version ${d.version}</p></div><button class="close-btn" onclick="closeModal()">×</button></div><div class="detail-grid"><div class="detail-item"><span>Unternehmen</span><strong>${esc(d.company)}</strong></div><div class="detail-item"><span>Bereich</span><strong>${esc(d.area)}</strong></div><div class="detail-item"><span>Status</span><strong>${d.status}</strong></div><div class="detail-item"><span>Verantwortlich</span><strong>${esc(d.owner)}</strong></div><div class="detail-item"><span>Nächste Prüfung</span><strong>${d.review}</strong></div><div class="detail-item"><span>Version</span><strong>${d.version}</strong></div></div><p style="font-size:12px;line-height:1.55">${esc(d.note)}</p><h3 style="font-size:13px">Freigabe- / Änderungshistorie</h3><div class="timeline"><div class="timeline-item"><strong>Freigabe abgeschlossen</strong><span>durch Geschäftsführung · 15.06.2026, 10:42 Uhr</span></div><div class="timeline-item"><strong>IMS-Prüfung abgeschlossen</strong><span>durch IMS-Administration · 14.06.2026, 14:16 Uhr</span></div><div class="timeline-item"><strong>Dokument eingestellt</strong><span>durch ${esc(d.owner)} · 12.06.2026, 09:08 Uhr</span></div></div><div class="modal-footer"><button class="btn secondary" onclick="toast('Demo: PDF-Vorschau würde geöffnet.')">PDF anzeigen</button><button class="btn" onclick="toast('Demo: Neue Version wird aus dem aktuellen Dokument erzeugt.')">Neue Version erstellen</button></div></div>`;
+    modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>${d.id} · ${esc(d.title)}</h2><p>${esc(d.type)} · Version ${d.version}</p></div><button class="close-btn" onclick="closeModal()">×</button></div><div class="detail-grid"><div class="detail-item"><span>Unternehmen</span><strong>${esc(d.company)}</strong></div><div class="detail-item"><span>Bereich</span><strong>${esc(d.area)}</strong></div><div class="detail-item"><span>Status</span><strong>${d.status}</strong></div><div class="detail-item"><span>Verantwortlich</span><strong>${esc(d.owner)}</strong></div><div class="detail-item"><span>Nächste Prüfung</span><strong>${d.review}</strong></div><div class="detail-item"><span>Version</span><strong>${d.version}</strong></div></div><p style="font-size:12px;line-height:1.55">${esc(d.note)}</p><h3 style="font-size:13px">Freigabe- / Änderungshistorie</h3><div class="timeline"><div class="timeline-item"><strong>Freigabe abgeschlossen</strong><span>durch Geschäftsführung · 15.06.2026, 10:42 Uhr</span></div><div class="timeline-item"><strong>IMS-Prüfung abgeschlossen</strong><span>durch IMS-Administration · 14.06.2026, 14:16 Uhr</span></div><div class="timeline-item"><strong>Dokument eingestellt</strong><span>durch ${esc(d.owner)} · 12.06.2026, 09:08 Uhr</span></div></div><div class="modal-footer"><button class="btn secondary" onclick="toast('PDF-Vorschau wird geöffnet.')">PDF anzeigen</button><button class="btn" onclick="toast('Neue Version wird aus dem aktuellen Dokument erzeugt.')">Neue Version erstellen</button></div></div>`;
   }
   modal.showModal();
 }
 function openNewDoc() {
-  modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>Neues Dokument anlegen</h2><p>Beispiel für die strukturierte Aufnahme in die Dokumentenlenkung.</p></div><button class="close-btn" onclick="closeModal()">×</button></div><div class="form-grid"><label class="field"><span>Dokumentart</span><select><option>Arbeitsanweisung</option><option>Verfahrensanweisung</option><option>Betriebsanweisung</option><option>Formular</option><option>Richtlinie</option></select></label><label class="field"><span>Dokumentnummer</span><input value="wird automatisch vergeben" disabled></label><label class="field full"><span>Titel</span><input placeholder="Titel des Dokuments"></label><label class="field"><span>Unternehmen</span><select>${companies
+  modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>Neues Dokument anlegen</h2><p>Strukturierte Aufnahme in die Dokumentenlenkung.</p></div><button class="close-btn" onclick="closeModal()">×</button></div><div class="form-grid"><label class="field"><span>Dokumentart</span><select><option>Arbeitsanweisung</option><option>Verfahrensanweisung</option><option>Betriebsanweisung</option><option>Formular</option><option>Richtlinie</option></select></label><label class="field"><span>Dokumentnummer</span><input value="wird automatisch vergeben" disabled></label><label class="field full"><span>Titel</span><input placeholder="Titel des Dokuments"></label><label class="field"><span>Unternehmen</span><select>${companies
     .slice(1)
     .concat(["Alle Unternehmen"])
     .map((x) => `<option>${x}</option>`)
     .join(
       "",
-    )}</select></label><label class="field"><span>Bereich</span><select><option>Arbeitssicherheit</option><option>Personal</option><option>Fuhrpark</option><option>Qualitätsmanagement</option><option>Einkauf / Lager</option></select></label><label class="field"><span>Prüfintervall</span><select><option>12 Monate</option><option>24 Monate</option><option>36 Monate</option><option>individuelles Datum</option></select></label><label class="field"><span>Freigabeworkflow</span><select><option>Fachprüfung → IMS → Geschäftsführung</option><option>Fachprüfung → Bereichsleitung</option><option>IMS → Geschäftsführung</option></select></label><label class="field full"><span>Datei</span><input type="file"></label></div><div class="modal-footer"><button class="btn secondary" onclick="closeModal()">Abbrechen</button><button class="btn" onclick="closeModal();toast('Demo: Dokument angelegt und Freigabeworkflow gestartet.')">Anlegen & Workflow starten</button></div></div>`;
+    )}</select></label><label class="field"><span>Bereich</span><select><option>Arbeitssicherheit</option><option>Personal</option><option>Fuhrpark</option><option>Qualitätsmanagement</option><option>Einkauf / Lager</option></select></label><label class="field"><span>Prüfintervall</span><select><option>12 Monate</option><option>24 Monate</option><option>36 Monate</option><option>individuelles Datum</option></select></label><label class="field"><span>Freigabeworkflow</span><select><option>Fachprüfung → IMS → Geschäftsführung</option><option>Fachprüfung → Bereichsleitung</option><option>IMS → Geschäftsführung</option></select></label><label class="field full"><span>Datei</span><input type="file"></label></div><div class="modal-footer"><button class="btn secondary" onclick="closeModal()">Abbrechen</button><button class="btn" onclick="closeModal();toast('Dokument angelegt und Freigabeworkflow gestartet.')">Anlegen & Workflow starten</button></div></div>`;
   modal.showModal();
 }
 function closeModal() {
@@ -454,8 +450,8 @@ function toast(msg) {
   t.classList.add("show");
   setTimeout(() => t.classList.remove("show"), 2600);
 }
-function setDemoView(view) {
-  demoView = view;
+function setPortalView(view) {
+  portalView = view;
   const isEmployee = view === "employee";
   document
     .querySelector("#switch-full")
@@ -472,7 +468,7 @@ function setDemoView(view) {
   if (settingsBtn) settingsBtn.style.display = isEmployee ? "none" : "";
   document.querySelector("#user-avatar").textContent = isEmployee ? "MA" : "PG";
   document.querySelector("#user-name").textContent = isEmployee
-    ? "Mitarbeiter (Demo)"
+    ? "Mitarbeiter"
     : "Pascal Gasch";
   document.querySelector("#user-role").textContent = isEmployee
     ? "Beschäftigtenansicht"
@@ -490,14 +486,15 @@ window.openDoc = openDoc;
 window.openNewDoc = openNewDoc;
 window.closeModal = closeModal;
 window.toast = toast;
-window.setDemoView = setDemoView;
-document.querySelector("#switch-full").onclick = () => setDemoView("full");
+window.setPortalView = setPortalView;
+document.querySelector("#switch-full").onclick = () => setPortalView("full");
 document.querySelector("#switch-employee").onclick = () =>
-  setDemoView("employee");
+  setPortalView("employee");
 document.querySelector('.sidebar-action[data-page="settings"]').onclick = () =>
   render("settings");
-document.querySelector("#demo-info").onclick = () => {
-  modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal · Demoversion</h2><p>Präsentationsstand V0.3</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Diese Demoversion arbeitet ausschließlich mit Beispieldaten im Browser und benötigt keinen Login. Sie veranschaulicht den möglichen Aufbau und die wesentlichen Abläufe des zukünftigen Managementportals.</p><p style="font-size:12px;line-height:1.65"> Unten links kann zwischen der vollständigen Managementansicht und einer bewusst reduzierten Mitarbeiteransicht gewechselt werden. Beschäftigte sehen nur Dashboard und Dokumentenregister mit den für sie freigegebenen Dokumentarten.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Verstanden</button></div></div>`;
+document.querySelector("#portal-info").onclick = () => {
+  modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal</h2><p>Version 0.1</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Zentrale Plattform für gelenkte Unternehmensdokumente, öffentliche Informationen, persönliche Dateien und gezielt freigegebene Arbeitsbereiche.</p><p style="font-size:12px;line-height:1.65">Die Benutzerberechtigung soll zukünftig über die Mitarbeiterkartei des TP-Personalmanagements gesteuert werden. Die Rollen Mitarbeiter, Vorgesetzter und Admin bestimmen den Funktionsumfang.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Schließen</button></div></div>`;
   modal.showModal();
 };
+document.querySelector("#personalmanagement-link").onclick = () => toast("TP-Personalmanagement wird geöffnet.");
 render("dashboard");
