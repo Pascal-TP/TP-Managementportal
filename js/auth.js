@@ -5,7 +5,7 @@ import {
   signOut,
   sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { collection, doc, getDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 export const ROLE_LABELS = {
   employee: "Mitarbeiter",
@@ -60,4 +60,30 @@ export async function loadPortalProfile(user) {
 
 export function observeAuth(callback) {
   return onAuthStateChanged(auth, callback);
+}
+
+
+export async function loadAssignableColleagues(profile, user) {
+  const result = new Map();
+  const addSnap = snap => {
+    snap.forEach(d => {
+      const v = d.data() || {};
+      if (v.active === false) return;
+      const label = String(v.name || v.email || "").trim();
+      if (label) result.set(d.id, { id: d.id, name: label, email: v.email || "", role: v.role || "employee" });
+    });
+  };
+  try {
+    if (profile?.role === "admin") {
+      addSnap(await getDocs(collection(db, "users")));
+    } else if (profile?.role === "supervisor" && user?.uid) {
+      addSnap(await getDocs(query(collection(db, "users"), where("supervisorId", "==", user.uid))));
+      addSnap(await getDocs(query(collection(db, "users"), where("supervisorId2", "==", user.uid))));
+    }
+  } catch (err) {
+    console.warn("Kollegenliste konnte nicht vollständig geladen werden:", err);
+  }
+  const selfLabel = String(profile?.name || profile?.email || "").trim();
+  if (user?.uid && selfLabel) result.set(user.uid, { id: user.uid, name: selfLabel, email: profile?.email || "", role: profile?.role || "employee" });
+  return [...result.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
 }
