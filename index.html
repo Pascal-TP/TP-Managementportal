@@ -3,12 +3,30 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>TP-Managementportal · V0.1</title>
+  <title>TP-Managementportal · V0.2</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div id="toast" class="toast" aria-live="polite"></div>
-  <div class="app-shell">
+
+  <section id="login-page" class="login-page">
+    <div class="login-card">
+      <div class="login-brand">
+        <img src="assets/tp.png" alt="TP Logo">
+        <div><strong>TP-Managementportal</strong><span>Version 0.2</span></div>
+      </div>
+      <h1>Anmelden</h1>
+      <p class="muted">Bitte mit denselben Zugangsdaten wie im TP-Personalmanagement anmelden.</p>
+      <form id="login-form" class="stack-form">
+        <label>Anmeldename<input id="login-identifier" type="text" autocomplete="username" placeholder="name@firma.de oder benutzername" required></label>
+        <label>Passwort<input id="login-password" type="password" autocomplete="current-password" required></label>
+        <button class="btn primary" type="submit">Anmelden</button>
+        <button class="btn secondary" id="forgot-password-btn" type="button">Passwort vergessen</button>
+        <p id="login-message" class="message"></p>
+      </form>
+    </div>
+  </section>
+  <div id="app-shell" class="app-shell hidden">
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-logo"><img src="assets/tp.png" alt="TP Logo"></div>
@@ -17,17 +35,10 @@
       <div class="role-heading">Managementsystem</div>
       <nav id="main-nav" class="main-nav"></nav>
       <div class="sidebar-footer">
-        <div class="view-switch" aria-label="Ansicht wechseln">
-          <div class="view-switch-label">Ansicht wechseln</div>
-          <div class="view-switch-buttons">
-            <button class="view-switch-btn active" id="switch-full" type="button">Vollansicht</button>
-            <button class="view-switch-btn" id="switch-employee" type="button">Mitarbeiteransicht</button>
-          </div>
-        </div>
         <button class="sidebar-action" id="personalmanagement-link">↗ TP-Personalmanagement</button>
-        <button class="sidebar-action" data-page="settings">⚙ Systemeinstellungen</button>
-        <button class="sidebar-action">Abmelden</button>
-        <div class="tool-release">TP-Managementportal · V0.1</div>
+        <button class="sidebar-action" id="settings-link" data-page="settings">⚙ Systemeinstellungen</button>
+        <button class="sidebar-action" id="logout-btn">Abmelden</button>
+        <div class="tool-release">TP-Managementportal · V0.2</div>
       </div>
     </aside>
     <main class="main-area">
@@ -42,6 +53,6 @@
     </main>
   </div>
   <dialog id="modal"><div id="modal-content"></div></dialog>
-  <script src="js/app.js"></script>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
