@@ -1,3 +1,13 @@
+import {
+  login,
+  logout,
+  requestPasswordReset,
+  loadPortalProfile,
+  observeAuth,
+  ROLE_LABELS,
+  initials
+} from "./auth.js";
+
 const companies = [
   "Alle Unternehmen",
   "TP Holding GmbH",
@@ -166,7 +176,8 @@ const employeeTypes = [
   "Sicherheitsdatenblatt",
 ];
 let current = "dashboard";
-let portalView = "full";
+let portalView = "employee";
+let currentProfile = null;
 const content = document.querySelector("#content"),
   title = document.querySelector("#page-title"),
   subtitle = document.querySelector("#page-subtitle"),
@@ -213,6 +224,8 @@ function setHead(t, s) {
   subtitle.textContent = s;
 }
 function render(page) {
+  if (!currentProfile) return;
+  if (page === "settings" && currentProfile.role !== "admin") page = "dashboard";
   if (portalView === "employee" && !employeeNav.some((x) => x[0] === page))
     page = "dashboard";
   current = page;
@@ -450,51 +463,92 @@ function toast(msg) {
   t.classList.add("show");
   setTimeout(() => t.classList.remove("show"), 2600);
 }
-function setPortalView(view) {
-  portalView = view;
-  const isEmployee = view === "employee";
-  document
-    .querySelector("#switch-full")
-    .classList.toggle("active", !isEmployee);
-  document
-    .querySelector("#switch-employee")
-    .classList.toggle("active", isEmployee);
-  document.querySelector(".role-heading").textContent = isEmployee
-    ? "Mitarbeiterportal"
-    : "Managementsystem";
-  const settingsBtn = document.querySelector(
-    '.sidebar-action[data-page="settings"]',
-  );
-  if (settingsBtn) settingsBtn.style.display = isEmployee ? "none" : "";
-  document.querySelector("#user-avatar").textContent = isEmployee ? "MA" : "PG";
-  document.querySelector("#user-name").textContent = isEmployee
-    ? "Mitarbeiter"
-    : "Pascal Gasch";
-  document.querySelector("#user-role").textContent = isEmployee
-    ? "Beschäftigtenansicht"
-    : "IMS-Administrator";
+function applyProfile(profile) {
+  currentProfile = profile;
+  portalView = profile.role === "employee" ? "employee" : "full";
+  document.querySelector(".role-heading").textContent =
+    profile.role === "admin"
+      ? "Adminbereich"
+      : profile.role === "supervisor"
+        ? "Vorgesetztenbereich"
+        : "Mitarbeiterbereich";
+  document.querySelector("#user-name").textContent = profile.name || profile.email || "Mitarbeiter";
+  document.querySelector("#user-role").textContent = ROLE_LABELS[profile.role] || profile.role;
+  document.querySelector("#user-avatar").textContent = initials(profile.name || profile.email);
+  const settingsBtn = document.querySelector("#settings-link");
+  if (settingsBtn) settingsBtn.style.display = profile.role === "admin" ? "" : "none";
   current = "dashboard";
   render("dashboard");
-  toast(
-    isEmployee
-      ? "Mitarbeiteransicht aktiviert."
-      : "Volle Managementansicht aktiviert.",
-  );
 }
+
+function showLogin(message = "") {
+  currentProfile = null;
+  document.querySelector("#app-shell").classList.add("hidden");
+  document.querySelector("#login-page").classList.remove("hidden");
+  document.querySelector("#login-message").textContent = message;
+}
+
+function showPortal(profile) {
+  document.querySelector("#login-message").textContent = "";
+  document.querySelector("#login-page").classList.add("hidden");
+  document.querySelector("#app-shell").classList.remove("hidden");
+  applyProfile(profile);
+}
+
 window.render = render;
 window.openDoc = openDoc;
 window.openNewDoc = openNewDoc;
 window.closeModal = closeModal;
 window.toast = toast;
-window.setPortalView = setPortalView;
-document.querySelector("#switch-full").onclick = () => setPortalView("full");
-document.querySelector("#switch-employee").onclick = () =>
-  setPortalView("employee");
-document.querySelector('.sidebar-action[data-page="settings"]').onclick = () =>
-  render("settings");
+
+document.querySelector("#settings-link").onclick = () => render("settings");
+document.querySelector("#logout-btn").onclick = () => logout();
 document.querySelector("#portal-info").onclick = () => {
-  modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal</h2><p>Version 0.1</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Zentrale Plattform für gelenkte Unternehmensdokumente, öffentliche Informationen, persönliche Dateien und gezielt freigegebene Arbeitsbereiche.</p><p style="font-size:12px;line-height:1.65">Die Benutzerberechtigung soll zukünftig über die Mitarbeiterkartei des TP-Personalmanagements gesteuert werden. Die Rollen Mitarbeiter, Vorgesetzter und Admin bestimmen den Funktionsumfang.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Schließen</button></div></div>`;
+  modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal</h2><p>Version 0.2</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Zentrale Plattform für gelenkte Unternehmensdokumente, öffentliche Informationen, persönliche Dateien und gezielt freigegebene Arbeitsbereiche.</p><p style="font-size:12px;line-height:1.65">Die Anmeldung und Zugangsberechtigung werden über das TP-Personalmanagement gesteuert. Die Rollen Mitarbeiter, Vorgesetzter und Admin bestimmen automatisch den Funktionsumfang.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Schließen</button></div></div>`;
   modal.showModal();
 };
-document.querySelector("#personalmanagement-link").onclick = () => toast("TP-Personalmanagement wird geöffnet.");
-render("dashboard");
+
+document.querySelector("#personalmanagement-link").onclick = () => {
+  const url = localStorage.getItem("tpPersonalmanagementUrl") || "";
+  if (url) window.open(url, "_blank", "noopener");
+  else toast("Die produktive URL des TP-Personalmanagements wird hier noch hinterlegt.");
+};
+
+document.querySelector("#login-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const msg = document.querySelector("#login-message");
+  msg.textContent = "Anmeldung läuft …";
+  try {
+    await login(
+      document.querySelector("#login-identifier").value,
+      document.querySelector("#login-password").value
+    );
+  } catch (err) {
+    console.error(err);
+    msg.textContent = "Anmeldung nicht möglich. Bitte Zugangsdaten prüfen.";
+  }
+});
+
+document.querySelector("#forgot-password-btn").onclick = async () => {
+  try {
+    await requestPasswordReset(document.querySelector("#login-identifier").value);
+    toast("Passwort-Link wurde angefordert.");
+  } catch (err) {
+    toast(err.message || "Passwort-Link konnte nicht angefordert werden.");
+  }
+};
+
+observeAuth(async user => {
+  if (!user) {
+    showLogin();
+    return;
+  }
+  try {
+    const profile = await loadPortalProfile(user);
+    showPortal(profile);
+  } catch (err) {
+    console.error(err);
+    await logout();
+    showLogin(err.message || "Der Zugang zum TP-Managementportal ist nicht möglich.");
+  }
+});
