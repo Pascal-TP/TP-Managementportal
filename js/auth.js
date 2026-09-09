@@ -85,27 +85,30 @@ export async function loadQmUser() {
   return null;
 }
 
-export async function loadAssignableColleagues(profile, user) {
+export function canManagePortalDocuments(profile = {}) {
+  if (["admin", "supervisor"].includes(profile.role)) return true;
+  return profile.role === "employee" && profile.managementPortalDocumentAccess === true;
+}
+
+export async function loadAssignableColleagues() {
   const result = new Map();
-  const addSnap = snap => {
+  try {
+    const snap = await getDocs(collection(db, "users"));
     snap.forEach(d => {
       const v = d.data() || {};
-      if (v.active === false) return;
+      if (v.active === false || v.managementPortalAccess !== true) return;
       const label = String(v.name || v.email || "").trim();
-      if (label) result.set(d.id, { id: d.id, name: label, email: v.email || "", role: v.role || "employee" });
+      if (!label) return;
+      result.set(d.id, {
+        id: d.id,
+        name: label,
+        email: v.email || "",
+        role: v.role || "employee",
+        documentAccess: canManagePortalDocuments(v)
+      });
     });
-  };
-  try {
-    if (profile?.role === "admin") {
-      addSnap(await getDocs(collection(db, "users")));
-    } else if (profile?.role === "supervisor" && user?.uid) {
-      addSnap(await getDocs(query(collection(db, "users"), where("supervisorId", "==", user.uid))));
-      addSnap(await getDocs(query(collection(db, "users"), where("supervisorId2", "==", user.uid))));
-    }
   } catch (err) {
     console.warn("Kollegenliste konnte nicht vollständig geladen werden:", err);
   }
-  const selfLabel = String(profile?.name || profile?.email || "").trim();
-  if (user?.uid && selfLabel) result.set(user.uid, { id: user.uid, name: selfLabel, email: profile?.email || "", role: profile?.role || "employee" });
   return [...result.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
 }
