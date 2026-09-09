@@ -243,7 +243,7 @@ function renderSettings() {
   content.innerHTML = `<div class="three-col"><div class="card"><h2>Pflicht-Workflow</h2><p class="muted"><strong>Arbeitsanweisung</strong><br><strong>Verfahrensanweisung</strong><br><strong>Betriebsanweisung</strong><br><br>Diese Dokumentarten können nicht ohne Freigabeworkflow veröffentlicht werden.</p></div><div class="card"><h2>Optionaler Workflow</h2><p class="muted">Bei allen anderen Dokumentarten kann beim Hochladen freiwillig ein Kollege für Prüfung/Freigabe ausgewählt werden.</p></div><div class="card"><h2>Dateiupload</h2><p class="muted">Dateien können ausgewählt oder direkt in die Uploadfläche gezogen und abgelegt werden.</p></div></div>`;
 }
 
-async async function openDoc(id) {
+async function openDoc(id) {
   const d = getDocument(id);
   if (!d) return toast("Dokument wurde nicht gefunden.");
   const actor = { ...currentProfile, uid: currentUser?.uid };
