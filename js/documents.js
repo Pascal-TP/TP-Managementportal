@@ -78,9 +78,36 @@ export function isDocumentReviewer(document, user = {}) {
   return Boolean(assigned && (assigned === u.name || assigned === u.email));
 }
 
+function isAdminUser(user = {}) {
+  return String(user?.role || "").trim().toLowerCase() === "admin";
+}
+
+export function getDocumentVisibilityMode(document) {
+  return document?.visibilityMode === "selected" ? "selected" : "all";
+}
+
+export function isDocumentVisibilityRecipient(document, user = {}) {
+  if (getDocumentVisibilityMode(document) !== "selected") return true;
+  const u = userKey(user);
+  const ids = Array.isArray(document?.visibilityUserIds) ? document.visibilityUserIds.map(String) : [];
+  if (u.uid && ids.includes(u.uid)) return true;
+  const recipients = Array.isArray(document?.visibilityUsers) ? document.visibilityUsers : [];
+  return recipients.some((entry) => {
+    const r = userKey(entry || {});
+    return Boolean(
+      (u.uid && r.uid && u.uid === r.uid) ||
+      (u.email && r.email && u.email === r.email) ||
+      (u.name && r.name && u.name === r.name)
+    );
+  });
+}
+
 export function canViewDocument(document, user = {}) {
   if (!document || document.archived === true) return false;
-  if (document.status === "Freigegeben") return true;
+  if (isAdminUser(user)) return true;
+  if (document.status === "Freigegeben") {
+    return isDocumentCreator(document, user) || isDocumentVisibilityRecipient(document, user);
+  }
   return isDocumentCreator(document, user) || isDocumentReviewer(document, user) || isDocumentQmReviewer(document, user);
 }
 
@@ -89,17 +116,15 @@ export function canAccessOriginal(document, user = {}) {
 }
 
 export function canAccessPdf(document, user = {}) {
-  if (!document || document.archived === true) return false;
-  if (document.status === "Freigegeben") return true;
-  return isDocumentCreator(document, user) || isDocumentReviewer(document, user) || isDocumentQmReviewer(document, user);
+  return canViewDocument(document, user);
 }
 
 export function getVisibleDocumentsForUser(user = {}) {
   return getDocuments().filter((d) => canViewDocument(d, user));
 }
 
-export function getVisibleDocumentsForEmployee() {
-  return getDocuments().filter((d) => d.status === "Freigegeben" && d.archived !== true);
+export function getVisibleDocumentsForEmployee(user = {}) {
+  return getDocuments().filter((d) => d.status === "Freigegeben" && canViewDocument(d, user));
 }
 
 export function generateDocumentNumber(type) {
@@ -215,6 +240,9 @@ export async function createDocument(payload, sourceFile, pdfFile = null) {
     workflowAssigneeId: payload.workflowAssigneeId || "",
     qmAssignee: "",
     qmAssigneeId: "",
+    visibilityMode: payload.visibilityMode === "selected" ? "selected" : "all",
+    visibilityUserIds: payload.visibilityMode === "selected" && Array.isArray(payload.visibilityUserIds) ? [...new Set(payload.visibilityUserIds.map(String).filter(Boolean))] : [],
+    visibilityUsers: payload.visibilityMode === "selected" && Array.isArray(payload.visibilityUsers) ? payload.visibilityUsers.map((u) => ({ id: String(u.id || u.uid || ""), uid: String(u.uid || u.id || ""), name: String(u.name || ""), email: String(u.email || "") })) : [],
     fileName: sourceFile.name,
     fileType: sourceFile.type || "application/octet-stream",
     fileSize: sourceFile.size,
@@ -246,6 +274,19 @@ export function updateDocumentMetadata(id, patch, by = "") {
   if (!d) return null;
   for (const key of ["title", "area", "company", "review", "note", "version"]) {
     if (patch[key] !== undefined) d[key] = String(patch[key]).trim();
+  }
+  if (patch.visibilityMode !== undefined) {
+    d.visibilityMode = patch.visibilityMode === "selected" ? "selected" : "all";
+  }
+  if (patch.visibilityUserIds !== undefined) {
+    d.visibilityUserIds = d.visibilityMode === "selected" && Array.isArray(patch.visibilityUserIds)
+      ? [...new Set(patch.visibilityUserIds.map(String).filter(Boolean))]
+      : [];
+  }
+  if (patch.visibilityUsers !== undefined) {
+    d.visibilityUsers = d.visibilityMode === "selected" && Array.isArray(patch.visibilityUsers)
+      ? patch.visibilityUsers.map((u) => ({ id: String(u.id || u.uid || ""), uid: String(u.uid || u.id || ""), name: String(u.name || ""), email: String(u.email || "") }))
+      : [];
   }
   d.updatedAt = new Date().toISOString();
   d.history = Array.isArray(d.history) ? d.history : [];
