@@ -64,25 +64,23 @@ export function observeAuth(callback) {
 
 
 export async function loadQmUser() {
-  const candidates = [
-    query(collection(db, "users"), where("name", "==", "QM")),
-    query(collection(db, "users"), where("email", "==", "qm@portal.local")),
-    query(collection(db, "users"), where("username", "==", "QM")),
-    query(collection(db, "users"), where("username", "==", "qm")),
-  ];
-  for (const q of candidates) {
-    try {
-      const snap = await getDocs(q);
-      const hit = snap.docs.find(d => d.data()?.active !== false && d.data()?.role === "admin");
-      if (hit) {
-        const v = hit.data() || {};
-        return { id: hit.id, name: String(v.name || v.email || "QM").trim(), email: v.email || "", role: v.role || "admin" };
-      }
-    } catch (err) {
-      console.warn("QM-Benutzer konnte über eine Suchvariante nicht geladen werden:", err);
-    }
+  try {
+    const snap = await getDocs(collection(db, "managementPortalUsers"));
+    const hit = snap.docs.find(d => {
+      const v = d.data() || {};
+      const name = String(v.name || "").trim().toLowerCase();
+      const username = String(v.username || "").trim().toLowerCase();
+      const email = String(v.email || "").trim().toLowerCase();
+      return v.active !== false && v.managementPortalAccess === true && v.role === "admin" &&
+        (name === "qm" || username === "qm" || email === "qm@portal.local");
+    });
+    if (!hit) return null;
+    const v = hit.data() || {};
+    return { id: hit.id, name: String(v.name || v.email || "QM").trim(), email: v.email || "", role: v.role || "admin" };
+  } catch (err) {
+    console.warn("QM-Benutzer konnte nicht aus dem Portalverzeichnis geladen werden:", err);
+    return null;
   }
-  return null;
 }
 
 export function canManagePortalDocuments(profile = {}) {
@@ -93,7 +91,7 @@ export function canManagePortalDocuments(profile = {}) {
 export async function loadAssignableColleagues() {
   const result = new Map();
   try {
-    const snap = await getDocs(collection(db, "users"));
+    const snap = await getDocs(collection(db, "managementPortalUsers"));
     snap.forEach(d => {
       const v = d.data() || {};
       if (v.active === false || v.managementPortalAccess !== true) return;
