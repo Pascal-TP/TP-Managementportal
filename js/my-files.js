@@ -14,7 +14,12 @@ const state = {
   breadcrumbs: [],
   items: { folders: [], files: [] },
   favoritesOnly: false,
-  busy: false
+  busy: false,
+  tree: {
+    children: new Map(),
+    expanded: new Set(),
+    loading: new Set()
+  }
 };
 
 function token() {
@@ -82,16 +87,25 @@ export async function renderMyFilesModule(ctx) {
         </div>
         <button class="btn secondary myfiles-favorite-filter" id="myfiles-favorites">☆ Nur Favoriten</button>
       </div>
-      <div class="myfiles-breadcrumbs" id="myfiles-breadcrumbs"></div>
-      <div class="myfiles-dropzone" id="myfiles-dropzone">
-        <span class="myfiles-drop-icon">⇧</span>
-        <div><strong>Dateien hier hineinziehen und ablegen</strong><small>oder oben „Dateien hochladen“ wählen · maximal 20 MB je Datei</small></div>
-      </div>
-      <div class="card myfiles-card">
-        <div class="myfiles-list-head">
-          <div>Name</div><div>Geändert</div><div>Größe</div><div>Aktionen</div>
-        </div>
-        <div id="myfiles-list" class="myfiles-list"><div class="myfiles-loading">Dateien werden geladen …</div></div>
+      <div class="myfiles-explorer">
+        <aside class="myfiles-tree-panel" id="myfiles-tree-panel">
+          <div class="myfiles-tree-head"><strong>Verzeichnisse</strong><button class="myfiles-tree-collapse" id="myfiles-tree-collapse" type="button" title="Verzeichnisstruktur ausblenden">‹</button></div>
+          <div class="myfiles-tree" id="myfiles-tree"><div class="myfiles-tree-loading">Verzeichnisse werden geladen …</div></div>
+        </aside>
+        <section class="myfiles-main">
+          <button class="btn secondary small myfiles-tree-show" id="myfiles-tree-show" type="button">☰ Verzeichnisse</button>
+          <div class="myfiles-breadcrumbs" id="myfiles-breadcrumbs"></div>
+          <div class="myfiles-dropzone" id="myfiles-dropzone">
+            <span class="myfiles-drop-icon">⇧</span>
+            <div><strong>Dateien hier hineinziehen und ablegen</strong><small>oder oben „Dateien hochladen“ wählen · maximal 20 MB je Datei</small></div>
+          </div>
+          <div class="card myfiles-card">
+            <div class="myfiles-list-head">
+              <div>Name</div><div>Geändert</div><div>Größe</div><div>Aktionen</div>
+            </div>
+            <div id="myfiles-list" class="myfiles-list"><div class="myfiles-loading">Dateien werden geladen …</div></div>
+          </div>
+        </section>
       </div>
     </div>`;
 
@@ -100,8 +114,98 @@ export async function renderMyFilesModule(ctx) {
   const input = content.querySelector("#myfiles-file-input");
   const drop = content.querySelector("#myfiles-dropzone");
   const favoriteBtn = content.querySelector("#myfiles-favorites");
+  const tree = content.querySelector("#myfiles-tree");
+  const explorer = content.querySelector(".myfiles-explorer");
+  const treeCollapse = content.querySelector("#myfiles-tree-collapse");
+  const treeShow = content.querySelector("#myfiles-tree-show");
 
   const showBusy = (text = "Bitte warten …") => { list.innerHTML = `<div class="myfiles-loading">${safeEsc(esc, text)}</div>`; };
+
+  function treeKey(parentId) { return parentId || "__root__"; }
+
+  async function loadTreeChildren(parentId = null, force = false) {
+    const key = treeKey(parentId);
+    if (!force && state.tree.children.has(key)) return state.tree.children.get(key);
+    if (state.tree.loading.has(key)) return state.tree.children.get(key) || [];
+    state.tree.loading.add(key);
+    drawTree();
+    try {
+      const idToken = await token();
+      const data = unwrap(await callList({ idToken, parentId, foldersOnly: true }));
+      const folders = data.folders || [];
+      state.tree.children.set(key, folders);
+      return folders;
+    } finally {
+      state.tree.loading.delete(key);
+      drawTree();
+    }
+  }
+
+  function folderHasLoadedChildren(folderId) {
+    return (state.tree.children.get(treeKey(folderId)) || []).length > 0;
+  }
+
+  function drawTreeBranch(parentId = null, depth = 0) {
+    const key = treeKey(parentId);
+    const folders = state.tree.children.get(key) || [];
+    return folders.map(folder => {
+      const expanded = state.tree.expanded.has(folder.id);
+      const loading = state.tree.loading.has(treeKey(folder.id));
+      const loaded = state.tree.children.has(treeKey(folder.id));
+      const hasChildren = folderHasLoadedChildren(folder.id);
+      const arrow = loading ? "…" : (expanded ? "▾" : "▸");
+      const childHtml = expanded ? `<div class="myfiles-tree-children">${drawTreeBranch(folder.id, depth + 1)}${loaded && !hasChildren ? `<div class="myfiles-tree-empty-child" style="--tree-depth:${depth + 1}">Keine Unterordner</div>` : ""}</div>` : "";
+      return `<div class="myfiles-tree-node">
+        <div class="myfiles-tree-row ${state.folderId === folder.id ? "active" : ""}" style="--tree-depth:${depth}">
+          <button class="myfiles-tree-toggle" type="button" data-tree-toggle="${safeEsc(esc, folder.id)}" title="Unterordner ${expanded ? "einklappen" : "anzeigen"}">${arrow}</button>
+          <button class="myfiles-tree-name" type="button" data-tree-open="${safeEsc(esc, folder.id)}" title="${safeEsc(esc, folder.name)}"><span class="myfiles-tree-folder">▰</span><span>${safeEsc(esc, folder.name)}</span></button>
+        </div>${childHtml}
+      </div>`;
+    }).join("");
+  }
+
+  function drawTree() {
+    if (!tree) return;
+    const rootLoading = state.tree.loading.has(treeKey(null));
+    const rootFolders = state.tree.children.get(treeKey(null));
+    tree.innerHTML = `<div class="myfiles-tree-row root ${state.folderId ? "" : "active"}" style="--tree-depth:0">
+      <span class="myfiles-tree-toggle placeholder">${rootLoading ? "…" : ""}</span>
+      <button class="myfiles-tree-name" type="button" data-tree-open=""><span class="myfiles-tree-root-icon">⌂</span><span>Meine Dateien</span></button>
+    </div>${rootFolders ? drawTreeBranch(null, 0) : `<div class="myfiles-tree-loading">Verzeichnisse werden geladen …</div>`}`;
+    tree.querySelectorAll("[data-tree-open]").forEach(btn => btn.onclick = () => {
+      state.folderId = btn.dataset.treeOpen || null;
+      state.favoritesOnly = false;
+      favoriteBtn.textContent = "☆ Nur Favoriten";
+      loadCurrent();
+    });
+    tree.querySelectorAll("[data-tree-toggle]").forEach(btn => btn.onclick = async () => {
+      const id = btn.dataset.treeToggle;
+      if (state.tree.expanded.has(id)) { state.tree.expanded.delete(id); drawTree(); return; }
+      state.tree.expanded.add(id);
+      drawTree();
+      try { await loadTreeChildren(id); } catch (err) { toast(errorText(err, "Unterordner konnten nicht geladen werden.")); }
+    });
+  }
+
+  async function syncTreeWithCurrent(forceParent = false) {
+    const currentKey = treeKey(state.folderId);
+    state.tree.children.set(currentKey, state.items.folders || []);
+    if (forceParent && state.folderId) {
+      const parentId = state.breadcrumbs.length > 1 ? state.breadcrumbs[state.breadcrumbs.length - 2].id : null;
+      await loadTreeChildren(parentId, true);
+    }
+    for (const crumb of state.breadcrumbs) state.tree.expanded.add(crumb.id);
+    drawTree();
+  }
+
+  async function refreshTreeAfterMutation() {
+    state.tree.children.delete(treeKey(state.folderId));
+    if (state.folderId) {
+      const parentId = state.breadcrumbs.length > 1 ? state.breadcrumbs[state.breadcrumbs.length - 2].id : null;
+      state.tree.children.delete(treeKey(parentId));
+    }
+    await loadCurrent();
+  }
 
   async function loadCurrent() {
     if (state.busy) return;
@@ -113,6 +217,7 @@ export async function renderMyFilesModule(ctx) {
       state.items = { folders: data.folders || [], files: data.files || [] };
       state.breadcrumbs = data.breadcrumbs || [];
       draw();
+      await syncTreeWithCurrent();
     } catch (err) {
       list.innerHTML = `<div class="myfiles-error">${safeEsc(esc, errorText(err, "Dateien konnten nicht geladen werden."))}</div>`;
     } finally {
@@ -194,7 +299,7 @@ export async function renderMyFilesModule(ctx) {
       try {
         const idToken = await token();
         await callCreateFolder({ idToken, parentId: state.folderId, name });
-        close(); toast("Ordner wurde angelegt."); await loadCurrent();
+        close(); toast("Ordner wurde angelegt."); await refreshTreeAfterMutation();
       } catch (err) { toast(errorText(err, "Ordner konnte nicht angelegt werden.")); }
     };
   }
@@ -236,7 +341,7 @@ export async function renderMyFilesModule(ctx) {
     try {
       const idToken = await token();
       await callRename({ idToken, kind, itemId: id, name: name.trim() });
-      toast("Name wurde geändert."); await loadCurrent();
+      toast("Name wurde geändert."); await refreshTreeAfterMutation();
     } catch (err) { toast(errorText(err, "Umbenennen fehlgeschlagen.")); }
   }
 
@@ -248,7 +353,8 @@ export async function renderMyFilesModule(ctx) {
     try {
       const idToken = await token();
       await callDelete({ idToken, kind, itemId: id });
-      toast(kind === "folder" ? "Ordner wurde gelöscht." : "Datei wurde gelöscht."); await loadCurrent();
+      toast(kind === "folder" ? "Ordner wurde gelöscht." : "Datei wurde gelöscht.");
+      if (kind === "folder") await refreshTreeAfterMutation(); else await loadCurrent();
     } catch (err) { toast(errorText(err, "Löschen fehlgeschlagen.")); }
   }
 
@@ -270,6 +376,9 @@ export async function renderMyFilesModule(ctx) {
   ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("dragover"); }));
   ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("dragover"); }));
   drop.addEventListener("drop", e => uploadFiles(e.dataTransfer?.files));
+  treeCollapse.onclick = () => explorer.classList.add("tree-collapsed");
+  treeShow.onclick = () => explorer.classList.remove("tree-collapsed");
+  if (window.matchMedia("(max-width: 760px)").matches) explorer.classList.add("tree-collapsed");
 
   await loadCurrent();
 }
