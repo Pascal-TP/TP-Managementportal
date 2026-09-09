@@ -135,6 +135,16 @@ async function putFile(id, file) {
   });
 }
 
+async function deleteStoredKey(id) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 export async function getStoredFile(id, variant = "source") {
   const db = await openDb();
   return new Promise((resolve, reject) => {
@@ -143,7 +153,6 @@ export async function getStoredFile(id, variant = "source") {
     const req = store.get(`${id}:${variant}`);
     req.onsuccess = () => {
       if (req.result) return resolve(req.result);
-      // Kompatibilität mit frühen V0.3-Dokumenten, die nur unter der Dokumentnummer gespeichert wurden.
       const legacy = store.get(id);
       legacy.onsuccess = () => resolve(legacy.result || null);
       legacy.onerror = () => reject(legacy.error);
@@ -194,13 +203,11 @@ export async function createDocument(payload, sourceFile, pdfFile = null) {
     createdBy: payload.createdBy || "",
     createdById: payload.createdById || "",
     archived: false,
-    history: [
-      {
-        at: now,
-        action: payload.workflowEnabled ? "Dokument eingestellt und Freigabeworkflow gestartet" : "Dokument eingestellt und veröffentlicht",
-        by: payload.createdBy || "",
-      },
-    ],
+    history: [{
+      at: now,
+      action: payload.workflowEnabled ? "Dokument eingestellt und Freigabeworkflow gestartet" : "Dokument eingestellt und veröffentlicht",
+      by: payload.createdBy || "",
+    }],
   };
 
   await putFile(`${id}:source`, sourceFile);
@@ -224,14 +231,75 @@ export function updateDocumentMetadata(id, patch, by = "") {
   return d;
 }
 
-export function updateDocumentStatus(id, status, by = "") {
+export function updateDocumentStatus(id, status, by = "", note = "") {
   const rows = readMeta();
   const d = rows.find((x) => x.id === id);
   if (!d) return null;
   d.status = status;
   d.updatedAt = new Date().toISOString();
   d.history = Array.isArray(d.history) ? d.history : [];
-  d.history.unshift({ at: d.updatedAt, action: `Status auf „${status}“ gesetzt`, by });
+  const suffix = note ? ` · Anmerkung: ${note}` : "";
+  d.history.unshift({ at: d.updatedAt, action: `Status auf „${status}“ gesetzt${suffix}`, by });
+  writeMeta(rows);
+  return d;
+}
+
+export async function replaceDocumentFiles(id, sourceFile, pdfFile, payload = {}, by = "") {
+  const rows = readMeta();
+  const d = rows.find((x) => x.id === id);
+  if (!d) throw new Error("Dokument wurde nicht gefunden.");
+  if (!sourceFile) throw new Error("Bitte die überarbeitete Originaldatei auswählen.");
+  const readingFile = isPdf(sourceFile) ? sourceFile : pdfFile;
+  if (!readingFile || !isPdf(readingFile)) throw new Error("Bitte zusätzlich die überarbeitete PDF-Lesefassung hochladen.");
+
+  await putFile(`${id}:source`, sourceFile);
+  await putFile(`${id}:pdf`, readingFile);
+  const now = new Date().toISOString();
+  d.fileName = sourceFile.name;
+  d.fileType = sourceFile.type || "application/octet-stream";
+  d.fileSize = sourceFile.size;
+  d.pdfFileName = readingFile.name;
+  d.pdfFileType = readingFile.type || "application/pdf";
+  d.pdfFileSize = readingFile.size;
+  if (payload.version !== undefined) d.version = String(payload.version || d.version).trim();
+  if (payload.note !== undefined) d.note = String(payload.note || "").trim();
+  if (payload.workflowAssignee !== undefined) d.workflowAssignee = String(payload.workflowAssignee || "").trim();
+  if (payload.workflowAssigneeId !== undefined) d.workflowAssigneeId = String(payload.workflowAssigneeId || "").trim();
+  d.workflowEnabled = Boolean(payload.workflowEnabled ?? d.workflowEnabled);
+  d.status = d.workflowEnabled ? "In Prüfung" : "Freigegeben";
+  d.updatedAt = now;
+  d.history = Array.isArray(d.history) ? d.history : [];
+  d.history.unshift({
+    at: now,
+    action: d.workflowEnabled ? "Dokument überarbeitet, Dateien ersetzt und Workflow neu gestartet" : "Dokument überarbeitet und neu veröffentlicht",
+    by,
+  });
+  writeMeta(rows);
+  return d;
+}
+
+export async function renameDocumentNumber(oldId, newId, by = "") {
+  const clean = String(newId || "").trim();
+  if (!clean) throw new Error("Bitte eine Dokumentnummer eingeben.");
+  if (oldId === clean) return getDocument(oldId);
+  const rows = readMeta();
+  if (rows.some((d) => d.id === clean)) throw new Error("Die neue Dokumentnummer ist bereits vorhanden.");
+  const d = rows.find((x) => x.id === oldId);
+  if (!d) throw new Error("Dokument wurde nicht gefunden.");
+
+  for (const variant of ["source", "pdf"]) {
+    const stored = await getStoredFile(oldId, variant);
+    if (stored?.file) await putFile(`${clean}:${variant}`, stored.file);
+  }
+  await deleteStoredKey(`${oldId}:source`).catch(() => {});
+  await deleteStoredKey(`${oldId}:pdf`).catch(() => {});
+  await deleteStoredKey(oldId).catch(() => {});
+
+  const now = new Date().toISOString();
+  d.id = clean;
+  d.updatedAt = now;
+  d.history = Array.isArray(d.history) ? d.history : [];
+  d.history.unshift({ at: now, action: `Dokumentnummer von „${oldId}“ auf „${clean}“ geändert`, by });
   writeMeta(rows);
   return d;
 }
@@ -247,6 +315,17 @@ export function archiveDocument(id, by = "") {
   d.history.unshift({ at: d.updatedAt, action: "Dokument archiviert", by });
   writeMeta(rows);
   return d;
+}
+
+export async function deleteDocument(id) {
+  const rows = readMeta();
+  const next = rows.filter((x) => x.id !== id);
+  if (next.length === rows.length) return false;
+  writeMeta(next);
+  await deleteStoredKey(`${id}:source`).catch(() => {});
+  await deleteStoredKey(`${id}:pdf`).catch(() => {});
+  await deleteStoredKey(id).catch(() => {});
+  return true;
 }
 
 async function openStoredVariant(id, variant) {
@@ -270,10 +349,8 @@ async function downloadStoredVariant(id, variant) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-export const openOriginalFile = (id) => openStoredVariant(id, "source");
 export const downloadOriginalFile = (id) => downloadStoredVariant(id, "source");
 export const openPdfFile = (id) => openStoredVariant(id, "pdf");
-export const downloadPdfFile = (id) => downloadStoredVariant(id, "pdf");
 
 export function clearPrototypeDocuments() {
   localStorage.removeItem(META_KEY);

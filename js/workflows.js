@@ -13,6 +13,21 @@ function writeRows(rows) {
   localStorage.setItem(KEY, JSON.stringify(rows));
 }
 
+function matchesUser(task, profile, side = "assignee") {
+  const uid = String(profile?.id || profile?.uid || "").trim();
+  const name = String(profile?.name || "").trim().toLowerCase();
+  const email = String(profile?.email || "").trim().toLowerCase();
+  if (side === "assignee") {
+    if (task.assigneeId && uid) return task.assigneeId === uid;
+    const a = String(task.assignee || "").trim().toLowerCase();
+    const ae = String(task.assigneeEmail || "").trim().toLowerCase();
+    return Boolean((a && (a === name || a === email)) || (ae && ae === email));
+  }
+  if (task.createdById && uid) return task.createdById === uid;
+  const cb = String(task.createdBy || "").trim().toLowerCase();
+  return Boolean(cb && (cb === name || cb === email));
+}
+
 export function createWorkflowTask(document, assignee, createdBy = "", createdById = "") {
   const rows = readRows();
   const now = new Date().toISOString();
@@ -27,6 +42,7 @@ export function createWorkflowTask(document, assignee, createdBy = "", createdBy
     createdBy,
     createdById: String(createdById || "").trim(),
     status: "Offen",
+    decisionNote: "",
     createdAt: now,
     updatedAt: now,
   };
@@ -40,39 +56,36 @@ export function getWorkflowTasks() {
 }
 
 export function getTasksForUser(profile) {
-  const uid = String(profile?.id || "").trim();
-  const name = String(profile?.name || "").trim().toLowerCase();
-  const email = String(profile?.email || "").trim().toLowerCase();
-  return getWorkflowTasks().filter((t) => {
-    if (t.status !== "Offen") return false;
-    if (t.assigneeId && uid) return t.assigneeId === uid;
-    const a = String(t.assignee || "").trim().toLowerCase();
-    const ae = String(t.assigneeEmail || "").trim().toLowerCase();
-    return Boolean((a && (a === name || a === email)) || (ae && ae === email));
-  });
+  return getWorkflowTasks().filter((t) => t.status === "Offen" && matchesUser(t, profile, "assignee"));
+}
+
+export function getRejectedTasksForCreator(profile, documents = []) {
+  const rejectedDocIds = new Set(documents.filter(d => d.status === "Abgelehnt").map(d => d.id));
+  return getWorkflowTasks().filter((t) => t.status === "Abgelehnt" && rejectedDocIds.has(t.documentId) && matchesUser(t, profile, "creator"));
 }
 
 export function getWorkflowTasksVisibleToUser(profile) {
-  const uid = String(profile?.id || profile?.uid || "").trim();
-  const name = String(profile?.name || "").trim().toLowerCase();
-  const email = String(profile?.email || "").trim().toLowerCase();
-  return getWorkflowTasks().filter((t) => {
-    if (t.assigneeId && uid && t.assigneeId === uid) return true;
-    if (t.createdById && uid && t.createdById === uid) return true;
-    const a = String(t.assignee || "").trim().toLowerCase();
-    const ae = String(t.assigneeEmail || "").trim().toLowerCase();
-    const cb = String(t.createdBy || "").trim().toLowerCase();
-    return Boolean((a && (a === name || a === email)) || (ae && ae === email) || (cb && (cb === name || cb === email)));
-  });
+  return getWorkflowTasks().filter((t) => matchesUser(t, profile, "assignee") || matchesUser(t, profile, "creator"));
 }
 
-export function completeWorkflowTask(id, completedBy = "") {
+export function decideWorkflowTask(id, decision, completedBy = "", note = "") {
   const rows = readRows();
   const task = rows.find((x) => x.id === id);
   if (!task) return null;
-  task.status = "Erledigt";
+  task.status = decision === "reject" ? "Abgelehnt" : "Freigegeben";
   task.completedBy = completedBy;
+  task.decisionNote = String(note || "").trim();
   task.updatedAt = new Date().toISOString();
   writeRows(rows);
   return task;
+}
+
+export function renameWorkflowDocument(oldId, newId) {
+  const rows = readRows();
+  rows.forEach(t => { if (t.documentId === oldId) t.documentId = newId; });
+  writeRows(rows);
+}
+
+export function deleteWorkflowTasksForDocument(documentId) {
+  writeRows(readRows().filter(t => t.documentId !== documentId));
 }
