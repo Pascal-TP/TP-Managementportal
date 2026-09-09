@@ -13,7 +13,7 @@ function writeRows(rows) {
   localStorage.setItem(KEY, JSON.stringify(rows));
 }
 
-export function createWorkflowTask(document, assignee, createdBy = "") {
+export function createWorkflowTask(document, assignee, createdBy = "", createdById = "") {
   const rows = readRows();
   const now = new Date().toISOString();
   const task = {
@@ -21,8 +21,11 @@ export function createWorkflowTask(document, assignee, createdBy = "") {
     documentId: document.id,
     documentTitle: document.title,
     documentType: document.type,
-    assignee: String(assignee || "").trim(),
+    assignee: String(assignee?.name || assignee?.email || "").trim(),
+    assigneeEmail: String(assignee?.email || "").trim(),
+    assigneeId: String(assignee?.id || "").trim(),
     createdBy,
+    createdById: String(createdById || "").trim(),
     status: "Offen",
     createdAt: now,
     updatedAt: now,
@@ -37,11 +40,29 @@ export function getWorkflowTasks() {
 }
 
 export function getTasksForUser(profile) {
+  const uid = String(profile?.id || "").trim();
   const name = String(profile?.name || "").trim().toLowerCase();
   const email = String(profile?.email || "").trim().toLowerCase();
   return getWorkflowTasks().filter((t) => {
+    if (t.status !== "Offen") return false;
+    if (t.assigneeId && uid) return t.assigneeId === uid;
     const a = String(t.assignee || "").trim().toLowerCase();
-    return t.status === "Offen" && a && (a === name || a === email);
+    const ae = String(t.assigneeEmail || "").trim().toLowerCase();
+    return Boolean((a && (a === name || a === email)) || (ae && ae === email));
+  });
+}
+
+export function getWorkflowTasksVisibleToUser(profile) {
+  const uid = String(profile?.id || profile?.uid || "").trim();
+  const name = String(profile?.name || "").trim().toLowerCase();
+  const email = String(profile?.email || "").trim().toLowerCase();
+  return getWorkflowTasks().filter((t) => {
+    if (t.assigneeId && uid && t.assigneeId === uid) return true;
+    if (t.createdById && uid && t.createdById === uid) return true;
+    const a = String(t.assignee || "").trim().toLowerCase();
+    const ae = String(t.assigneeEmail || "").trim().toLowerCase();
+    const cb = String(t.createdBy || "").trim().toLowerCase();
+    return Boolean((a && (a === name || a === email)) || (ae && ae === email) || (cb && (cb === name || cb === email)));
   });
 }
 

@@ -56,6 +56,48 @@ export function getDocument(id) {
   return readMeta().find((d) => d.id === id) || null;
 }
 
+function userKey(user = {}) {
+  return {
+    uid: String(user.uid || user.id || "").trim(),
+    name: String(user.name || "").trim().toLowerCase(),
+    email: String(user.email || "").trim().toLowerCase(),
+  };
+}
+
+export function isDocumentCreator(document, user = {}) {
+  const u = userKey(user);
+  if (document?.createdById && u.uid) return document.createdById === u.uid;
+  const createdBy = String(document?.createdBy || "").trim().toLowerCase();
+  return Boolean(createdBy && (createdBy === u.name || createdBy === u.email));
+}
+
+export function isDocumentReviewer(document, user = {}) {
+  const u = userKey(user);
+  if (document?.workflowAssigneeId && u.uid) return document.workflowAssigneeId === u.uid;
+  const assigned = String(document?.workflowAssignee || "").trim().toLowerCase();
+  return Boolean(assigned && (assigned === u.name || assigned === u.email));
+}
+
+export function canViewDocument(document, user = {}) {
+  if (!document || document.archived === true) return false;
+  if (document.status === "Freigegeben") return true;
+  return isDocumentCreator(document, user) || isDocumentReviewer(document, user);
+}
+
+export function canAccessOriginal(document, user = {}) {
+  return isDocumentCreator(document, user);
+}
+
+export function canAccessPdf(document, user = {}) {
+  if (!document || document.archived === true) return false;
+  if (document.status === "Freigegeben") return true;
+  return isDocumentCreator(document, user) || isDocumentReviewer(document, user);
+}
+
+export function getVisibleDocumentsForUser(user = {}) {
+  return getDocuments().filter((d) => canViewDocument(d, user));
+}
+
 export function getVisibleDocumentsForEmployee() {
   return getDocuments().filter((d) => d.status === "Freigegeben" && d.archived !== true);
 }
@@ -93,22 +135,39 @@ async function putFile(id, file) {
   });
 }
 
-export async function getStoredFile(id) {
+export async function getStoredFile(id, variant = "source") {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readonly");
-    const req = tx.objectStore(STORE_NAME).get(id);
-    req.onsuccess = () => resolve(req.result || null);
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.get(`${id}:${variant}`);
+    req.onsuccess = () => {
+      if (req.result) return resolve(req.result);
+      // Kompatibilität mit frühen V0.3-Dokumenten, die nur unter der Dokumentnummer gespeichert wurden.
+      const legacy = store.get(id);
+      legacy.onsuccess = () => resolve(legacy.result || null);
+      legacy.onerror = () => reject(legacy.error);
+    };
     req.onerror = () => reject(req.error);
   });
 }
 
-export async function createDocument(payload, file) {
-  if (!file) throw new Error("Bitte eine Datei auswählen oder hineinziehen.");
+function isPdf(file) {
+  return Boolean(file && (file.type === "application/pdf" || /\.pdf$/i.test(file.name || "")));
+}
+
+export async function createDocument(payload, sourceFile, pdfFile = null) {
+  if (!sourceFile) throw new Error("Bitte die Originaldatei auswählen oder hineinziehen.");
+  const readingFile = isPdf(sourceFile) ? sourceFile : pdfFile;
+  if (!readingFile || !isPdf(readingFile)) {
+    throw new Error("Bitte zusätzlich eine PDF-Lesefassung hochladen. Andere Nutzer dürfen ausschließlich die PDF-Version öffnen.");
+  }
+
   const rows = readMeta();
   const now = new Date().toISOString();
   const id = payload.id || generateDocumentNumber(payload.type);
   if (rows.some((d) => d.id === id)) throw new Error("Die Dokumentnummer ist bereits vorhanden.");
+
   const doc = {
     id,
     title: payload.title.trim(),
@@ -123,12 +182,17 @@ export async function createDocument(payload, file) {
     workflowEnabled: Boolean(payload.workflowEnabled),
     workflowMandatory: Boolean(payload.workflowMandatory),
     workflowAssignee: payload.workflowAssignee?.trim() || "",
-    fileName: file.name,
-    fileType: file.type || "application/octet-stream",
-    fileSize: file.size,
+    workflowAssigneeId: payload.workflowAssigneeId || "",
+    fileName: sourceFile.name,
+    fileType: sourceFile.type || "application/octet-stream",
+    fileSize: sourceFile.size,
+    pdfFileName: readingFile.name,
+    pdfFileType: readingFile.type || "application/pdf",
+    pdfFileSize: readingFile.size,
     createdAt: now,
     updatedAt: now,
     createdBy: payload.createdBy || "",
+    createdById: payload.createdById || "",
     archived: false,
     history: [
       {
@@ -138,7 +202,9 @@ export async function createDocument(payload, file) {
       },
     ],
   };
-  await putFile(id, file);
+
+  await putFile(`${id}:source`, sourceFile);
+  await putFile(`${id}:pdf`, readingFile);
   rows.push(doc);
   writeMeta(rows);
   return doc;
@@ -183,26 +249,31 @@ export function archiveDocument(id, by = "") {
   return d;
 }
 
-export async function openDocumentFile(id) {
-  const stored = await getStoredFile(id);
-  if (!stored?.file) throw new Error("Zu diesem Dokument ist lokal keine Datei gespeichert.");
+async function openStoredVariant(id, variant) {
+  const stored = await getStoredFile(id, variant);
+  if (!stored?.file) throw new Error(variant === "pdf" ? "Zu diesem Dokument ist keine PDF-Lesefassung gespeichert." : "Zu diesem Dokument ist keine Originaldatei gespeichert.");
   const url = URL.createObjectURL(stored.file);
   window.open(url, "_blank", "noopener");
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-export async function downloadDocumentFile(id) {
-  const stored = await getStoredFile(id);
-  if (!stored?.file) throw new Error("Zu diesem Dokument ist lokal keine Datei gespeichert.");
+async function downloadStoredVariant(id, variant) {
+  const stored = await getStoredFile(id, variant);
+  if (!stored?.file) throw new Error(variant === "pdf" ? "Zu diesem Dokument ist keine PDF-Lesefassung gespeichert." : "Zu diesem Dokument ist keine Originaldatei gespeichert.");
   const url = URL.createObjectURL(stored.file);
   const a = document.createElement("a");
   a.href = url;
-  a.download = stored.name || "Dokument";
+  a.download = stored.name || (variant === "pdf" ? "Dokument.pdf" : "Dokument");
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
+
+export const openOriginalFile = (id) => openStoredVariant(id, "source");
+export const downloadOriginalFile = (id) => downloadStoredVariant(id, "source");
+export const openPdfFile = (id) => openStoredVariant(id, "pdf");
+export const downloadPdfFile = (id) => downloadStoredVariant(id, "pdf");
 
 export function clearPrototypeDocuments() {
   localStorage.removeItem(META_KEY);
