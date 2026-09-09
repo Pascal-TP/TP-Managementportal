@@ -47,6 +47,7 @@ import {
   renameWorkflowDocument,
   deleteWorkflowTasksForDocument
 } from "./workflows.js";
+import { renderMyFilesModule } from "./my-files.js";
 
 const companies = [
   "Alle Unternehmen",
@@ -77,7 +78,6 @@ const employeeNav = [
   ["dashboard", "▦", "Dashboard"],
   ["documents", "▤", "Dokumentenregister"],
   ["areas", "▣", "Öffentliche Bereiche"],
-  ["myfiles", "▱", "Meine Dateien"],
   ["shared", "♧", "Für mich freigegeben"],
 ];
 const employeeEditorNav = [
@@ -252,9 +252,19 @@ function renderAreas() {
   content.innerHTML = `<div class="card"><div class="card-head"><div><h2>Öffentlicher Bereich</h2><p>Gemeinsam genutzte Inhalte werden zentral im TP-Managementportal bereitgestellt.</p></div>${portalView !== "employee" ? '<button class="btn" onclick="toast(\'Ordnerverwaltung folgt in einem eigenen Modul.\')">+ Neuer Ordner</button>' : ''}</div><div class="folder-list">${folders.map(f => `<button class="folder-row" onclick="toast('Ordner ${f[1]} geöffnet.')"><span class="folder-icon">${f[0]}</span><span><strong>${f[1]}</strong><small>${f[2]}</small></span><span class="folder-arrow">›</span></button>`).join("")}</div></div>`;
 }
 function renderMyFiles() {
-  setHead("Meine Dateien", "Ihr persönlicher Arbeitsbereich im TP-Managementportal.");
-  content.innerHTML = `<div class="info-strip"><strong>Persönlicher Bereich:</strong> Auf diese Dateien und Ordner hat standardmäßig nur der angemeldete Mitarbeiter Zugriff.</div><div class="card">${emptyState("Persönliche Dateiverwaltung vorbereitet", "Ordner, Upload und persönliche Zugriffsrechte werden als separates Modul umgesetzt.")}</div>`;
+  if (portalView === "employee") return render("dashboard");
+  setHead("Meine Dateien", "Ihr persönlicher Datei-Explorer im TP-Managementportal.");
+  renderMyFilesModule({
+    content,
+    modal,
+    modalContent,
+    esc,
+    toast,
+    profile: currentProfile,
+    user: currentUser
+  });
 }
+
 function renderShared() {
   setHead("Für mich freigegeben", "Ordner und Dateien, die gezielt mit Ihnen geteilt wurden.");
   content.innerHTML = `<div class="info-strip">Freigaben sollen für einzelne Personen vergeben werden. Unterordner übernehmen standardmäßig die Berechtigung des übergeordneten Ordners.</div><div class="card">${emptyState("Noch keine Freigaben", "Personenbezogene Ordnerfreigaben werden in einem späteren Dateiverwaltungsmodul angebunden.")}</div>`;
@@ -585,7 +595,7 @@ async function showPortal(profile, user) { document.querySelector("#login-messag
 Object.assign(window, { render, openDoc, openNewDoc, openEditDoc, openReviewTask, finishReview, openQmTask, finishQmTask, openRevisionDoc, closeModal, toast, archiveCurrentDoc, deleteCurrentDoc, editCurrentDoc, openPdfCurrentDoc });
 document.querySelector("#settings-link").onclick = () => render("settings");
 document.querySelector("#logout-btn").onclick = () => logout();
-document.querySelector("#portal-info").onclick = () => { modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal</h2><p>Version 0.6</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Zentrale Plattform für Unternehmensdokumente, Freigabeworkflows, öffentliche Informationen, persönliche Dateien und freigegebene Arbeitsbereiche.</p><p style="font-size:12px;line-height:1.65"><strong>V0.6:</strong> Die Workflow-Auswahl berücksichtigt zentral alle für das TP-Managementportal freigeschalteten Benutzer. Mitarbeiter können über eine zusätzliche Berechtigung Dokumente erstellen, hochladen und Freigabeaufgaben bearbeiten; ohne diese Berechtigung bleibt ihre Ansicht auf Lesen und Nutzen beschränkt.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Schließen</button></div></div>`; modal.showModal(); };
+document.querySelector("#portal-info").onclick = () => { modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal</h2><p>Version 0.7</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Zentrale Plattform für Unternehmensdokumente, Freigabeworkflows, öffentliche Informationen, persönliche Dateien und freigegebene Arbeitsbereiche.</p><p style="font-size:12px;line-height:1.65"><strong>V0.7:</strong> „Meine Dateien“ ist jetzt als persönlicher Datei-Explorer angebunden. Berechtigte Nutzer können eigene Ordner und Unterordner anlegen, Dateien per Auswahl oder Drag & Drop hochladen, PDFs direkt im Browser öffnen und persönliche Favoriten verwalten.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Schließen</button></div></div>`; modal.showModal(); };
 document.querySelector("#personalmanagement-link").onclick = () => { const url = localStorage.getItem("tpPersonalmanagementUrl") || ""; if (url) window.open(url, "_blank", "noopener"); else toast("Die produktive URL des TP-Personalmanagements wird hier noch hinterlegt."); };
 document.querySelector("#login-form").addEventListener("submit", async e => { e.preventDefault(); const msg = document.querySelector("#login-message"); msg.textContent = "Anmeldung läuft …"; try { await login(document.querySelector("#login-identifier").value, document.querySelector("#login-password").value); } catch (err) { console.error(err); msg.textContent = "Anmeldung nicht möglich. Bitte Zugangsdaten prüfen."; } });
 document.querySelector("#forgot-password-btn").onclick = async () => { try { await requestPasswordReset(document.querySelector("#login-identifier").value); toast("Passwort-Link wurde angefordert."); } catch (err) { toast(err.message || "Passwort-Link konnte nicht angefordert werden."); } };
