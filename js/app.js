@@ -4,6 +4,7 @@ import {
   requestPasswordReset,
   loadPortalProfile,
   loadAssignableColleagues,
+  loadQmUser,
   observeAuth,
   ROLE_LABELS,
   initials
@@ -19,11 +20,15 @@ import {
   canAccessOriginal,
   canAccessPdf,
   isDocumentCreator,
+  isDocumentQmReviewer,
+  getDisplayDocumentNumber,
   generateDocumentNumber,
   createDocument,
   updateDocumentMetadata,
   updateDocumentStatus,
   replaceDocumentFiles,
+  sendDocumentToQm,
+  markDocumentNumberAssigned,
   renameDocumentNumber,
   archiveDocument,
   deleteDocument,
@@ -32,6 +37,7 @@ import {
 } from "./documents.js";
 import {
   createWorkflowTask,
+  createQmWorkflowTask,
   getWorkflowTasks,
   getWorkflowTasksVisibleToUser,
   getTasksForUser,
@@ -79,6 +85,7 @@ let portalView = "employee";
 let currentProfile = null;
 let currentUser = null;
 let colleagues = [];
+let qmUser = null;
 let pendingUploadFile = null;
 let pendingPdfFile = null;
 const content = document.querySelector("#content");
@@ -108,8 +115,14 @@ function humanSize(bytes = 0) {
   return `${v.toFixed(i ? 1 : 0)} ${units[i]}`;
 }
 function status(s) {
-  const c = s === "Freigegeben" ? "good" : s === "In Prüfung" ? "warn" : s === "Abgelehnt" ? "bad" : s === "Archiviert" ? "gray" : "info";
+  const c = s === "Freigegeben" ? "good" : (s === "In Prüfung" || s === "QM-Prüfung") ? "warn" : s === "Abgelehnt" ? "bad" : s === "Archiviert" ? "gray" : "info";
   return `<span class="badge ${c}"><i class="dot"></i>${esc(s)}</span>`;
+}
+function displayDocNo(d) { return getDisplayDocumentNumber(d); }
+function isQm(profile = currentProfile) {
+  const name = String(profile?.name || "").trim().toLowerCase();
+  const email = String(profile?.email || "").trim().toLowerCase();
+  return profile?.role === "admin" && (name === "qm" || email === "qm@portal.local");
 }
 function emptyState(titleText, text, button = "") {
   return `<div class="empty-state"><div class="empty-icon">▤</div><strong>${esc(titleText)}</strong><p>${esc(text)}</p>${button}</div>`;
@@ -134,10 +147,16 @@ function render(page) {
 }
 
 function taskRow(task, own = false) {
+  const isQmTask = task.kind === "qm";
+  const statusText = isQmTask ? "Zur Nummerierung" : "Zu prüfen";
+  const buttonText = isQmTask ? "Bearbeiten" : "Prüfen";
+  const handler = isQmTask ? `openQmTask('${task.id}')` : `openReviewTask('${task.id}')`;
   const action = own
-    ? `<div class="task-actions"><span class="workflow-status">Zu prüfen</span><button class="btn small" onclick="openReviewTask('${task.id}')">Prüfen</button></div>`
-    : `<span class="workflow-status">${task.status === "Offen" ? "Zu prüfen" : esc(task.status)}</span>`;
-  return `<div class="task workflow-task"><div class="task-icon">✓</div><div><strong>${esc(task.documentId)} · ${esc(task.documentTitle)}</strong><span>${esc(task.documentType)} · Aufgabe für ${esc(task.assignee)}</span></div>${action}</div>`;
+    ? `<div class="task-actions"><span class="workflow-status">${statusText}</span><button class="btn small" onclick="${handler}">${buttonText}</button></div>`
+    : `<span class="workflow-status">${task.status === "Offen" ? statusText : esc(task.status)}</span>`;
+  const d = getDocument(task.documentId);
+  const number = d ? displayDocNo(d) : task.documentId;
+  return `<div class="task workflow-task"><div class="task-icon">✓</div><div><strong>${esc(number)}${number !== "–" ? " · " : ""}${esc(task.documentTitle)}</strong><span>${esc(task.documentType)} · ${isQmTask ? "QM-Endprüfung" : "Aufgabe"} für ${esc(task.assignee)}</span></div>${action}</div>`;
 }
 function renderDashboard() {
   setHead("Dashboard", "Zentrale Übersicht des integrierten Managementsystems.");
@@ -148,7 +167,7 @@ function renderDashboard() {
   const rejected = getRejectedTasksForCreator(actor, docs);
   const openAll = getWorkflowTasksVisibleToUser(actor).filter(t => t.status === "Offen").length;
   const recent = docs.slice(0, 5);
-  const feedback = rejected.length ? `<div class="card rejection-card"><div class="card-head"><div><h2>Zur Überarbeitung zurückgegeben</h2><p>Diese Dokumente wurden abgelehnt. Der Ablehnungsgrund ist hinterlegt; anschließend können neue Dateien hochgeladen und der Workflow neu gestartet werden.</p></div></div><div class="task-list">${rejected.map(t => `<div class="task workflow-task"><div class="task-icon">!</div><div><strong>${esc(t.documentId)} · ${esc(t.documentTitle)}</strong><span>${t.decisionNote ? `Grund: ${esc(t.decisionNote)}` : "Dokument wurde zur Überarbeitung zurückgegeben."}</span></div><button class="btn small" onclick="openRevisionDoc('${t.documentId}')">Überarbeiten</button></div>`).join("")}</div></div>` : "";
+  const feedback = rejected.length ? `<div class="card rejection-card"><div class="card-head"><div><h2>Zur Überarbeitung zurückgegeben</h2><p>Diese Dokumente wurden abgelehnt. Der Ablehnungsgrund ist hinterlegt; anschließend können neue Dateien hochgeladen und der Workflow neu gestartet werden.</p></div></div><div class="task-list">${rejected.map(t => `<div class="task workflow-task"><div class="task-icon">!</div><div><strong>${esc(displayDocNo(getDocument(t.documentId)))}${displayDocNo(getDocument(t.documentId)) !== "–" ? " · " : ""}${esc(t.documentTitle)}</strong><span>${t.decisionNote ? `Grund: ${esc(t.decisionNote)}` : "Dokument wurde zur Überarbeitung zurückgegeben."}</span></div><button class="btn small" onclick="openRevisionDoc('${t.documentId}')">Überarbeiten</button></div>`).join("")}</div></div>` : "";
   content.innerHTML = `
     <div class="kpi-grid"><div class="kpi"><span>Freigegebene Dokumente</span><strong>${approved}</strong><small>aktuell veröffentlicht</small></div><div class="kpi warn"><span>Offene Workflows</span><strong>${openAll}</strong><small>${myTasks.length} Aufgabe(n) für Sie</small></div><div class="kpi"><span>Dokumente gesamt</span><strong>${docs.length}</strong><small>ohne Archiv</small></div><div class="kpi"><span>Unternehmen</span><strong>4</strong><small>zentral filterbar</small></div></div>
     ${feedback}
@@ -160,7 +179,7 @@ function renderDashboard() {
 function employeeDocs() { return getVisibleDocumentsForEmployee(); }
 function employeeDocTable(rows) {
   if (!rows.length) return emptyState("Keine freigegebenen Dokumente", "Sobald ein Dokument freigegeben wurde, erscheint es hier automatisch.");
-  return `<div class="table-wrap"><table class="data-table"><thead><tr><th>Nr.</th><th>Dokument</th><th>Dokumentart</th><th>Unternehmen</th><th>Bereich</th><th>Version</th></tr></thead><tbody>${rows.map(d => `<tr><td><strong>${esc(d.id)}</strong></td><td><div class="doc-title" onclick="openDoc('${d.id}')">${esc(d.title)}<small>${esc(d.pdfFileName || "PDF-Lesefassung")}</small></div></td><td>${esc(d.type)}</td><td>${esc(d.company)}</td><td>${esc(d.area)}</td><td>${esc(d.version)}</td></tr>`).join("")}</tbody></table></div>`;
+  return `<div class="table-wrap"><table class="data-table"><thead><tr><th>Nr.</th><th>Dokument</th><th>Dokumentart</th><th>Unternehmen</th><th>Bereich</th><th>Version</th></tr></thead><tbody>${rows.map(d => `<tr><td><strong>${esc(displayDocNo(d))}</strong></td><td><div class="doc-title" onclick="openDoc('${d.id}')">${esc(d.title)}<small>${esc(d.pdfFileName || "PDF-Lesefassung")}</small></div></td><td>${esc(d.type)}</td><td>${esc(d.company)}</td><td>${esc(d.area)}</td><td>${esc(d.version)}</td></tr>`).join("")}</tbody></table></div>`;
 }
 function renderEmployeeDashboard() {
   setHead("Dashboard", "Aktuelle Informationen und freigegebene Dokumente für Beschäftigte.");
@@ -184,12 +203,12 @@ function filterEmployeeDocs() {
 
 function docTable(rows) {
   if (!rows.length) return emptyState("Keine Dokumente vorhanden", "Für die gewählten Filter wurden keine Dokumente gefunden.");
-  return `<div class="table-wrap"><table class="data-table"><thead><tr><th>Nr.</th><th>Dokument</th><th>Unternehmen</th><th>Bereich</th><th>Version</th><th>Status</th><th>Nächste Prüfung</th></tr></thead><tbody>${rows.map(d => `<tr><td><strong>${esc(d.id)}</strong></td><td><div class="doc-title" onclick="openDoc('${d.id}')">${esc(d.title)}<small>${esc(d.type)} · ${esc(d.pdfFileName || "PDF-Lesefassung")}</small></div></td><td>${esc(d.company)}</td><td>${esc(d.area)}</td><td>${esc(d.version)}</td><td>${status(d.status)}</td><td>${fmtDate(d.review)}</td></tr>`).join("")}</tbody></table></div>`;
+  return `<div class="table-wrap"><table class="data-table"><thead><tr><th>Nr.</th><th>Dokument</th><th>Unternehmen</th><th>Bereich</th><th>Version</th><th>Status</th><th>Nächste Prüfung</th></tr></thead><tbody>${rows.map(d => `<tr><td><strong>${esc(displayDocNo(d))}</strong></td><td><div class="doc-title" onclick="openDoc('${d.id}')">${esc(d.title)}<small>${esc(d.type)} · ${esc(d.pdfFileName || "PDF-Lesefassung")}</small></div></td><td>${esc(d.company)}</td><td>${esc(d.area)}</td><td>${esc(d.version)}</td><td>${status(d.status)}</td><td>${fmtDate(d.review)}</td></tr>`).join("")}</tbody></table></div>`;
 }
 function renderDocuments() {
   setHead("Dokumentenregister", "Dokumente zentral suchen, filtern und verwalten.");
   const docs = getVisibleDocumentsForUser({ ...currentProfile, uid: currentUser?.uid }).filter(d => !d.archived);
-  content.innerHTML = `<div class="card"><div class="card-head"><div><h2>Dokumentenregister</h2><p>Dokumente einschließlich Version, Freigabestatus und Wiedervorlage.</p></div><button class="btn" onclick="openNewDoc()">+ Neues Dokument</button></div><div class="filter-bar"><input id="q" placeholder="Dokumentnummer oder Titel suchen…"><select id="fc">${companies.map(x => `<option>${x}</option>`).join("")}</select><select id="fa"><option>Alle Bereiche</option>${[...new Set(docs.map(x => x.area))].map(x => `<option>${esc(x)}</option>`).join("")}</select><select id="fs"><option>Alle Status</option><option>Freigegeben</option><option>In Prüfung</option><option>Abgelehnt</option></select><button class="btn secondary" id="reset">Zurücksetzen</button></div><div id="docs-table">${docTable(docs)}</div></div>`;
+  content.innerHTML = `<div class="card"><div class="card-head"><div><h2>Dokumentenregister</h2><p>Dokumente einschließlich Version, Freigabestatus und Wiedervorlage.</p></div><button class="btn" onclick="openNewDoc()">+ Neues Dokument</button></div><div class="filter-bar"><input id="q" placeholder="Dokumentnummer oder Titel suchen…"><select id="fc">${companies.map(x => `<option>${x}</option>`).join("")}</select><select id="fa"><option>Alle Bereiche</option>${[...new Set(docs.map(x => x.area))].map(x => `<option>${esc(x)}</option>`).join("")}</select><select id="fs"><option>Alle Status</option><option>Freigegeben</option><option>In Prüfung</option><option>QM-Prüfung</option><option>Abgelehnt</option></select><button class="btn secondary" id="reset">Zurücksetzen</button></div><div id="docs-table">${docTable(docs)}</div></div>`;
   ["q","fc","fa","fs"].forEach(id => document.querySelector("#" + id).oninput = filterDocs);
   document.querySelector("#reset").onclick = renderDocuments;
 }
@@ -206,13 +225,13 @@ function renderWorkflow() {
   const all = getWorkflowTasksVisibleToUser(actor);
   const open = all.filter(t => t.status === "Offen");
   const mine = getTasksForUser(actor);
-  const completed = all.filter(t => t.status === "Freigegeben" || t.status === "Abgelehnt");
+  const completed = all.filter(t => t.status === "Freigegeben" || t.status === "Veröffentlicht" || t.status === "Abgelehnt");
   content.innerHTML = `<div class="kpi-grid"><div class="kpi warn"><span>Meine offenen Aufgaben</span><strong>${mine.length}</strong><small>persönlich zugewiesen</small></div><div class="kpi"><span>Offene Workflows</span><strong>${open.length}</strong><small>für Sie sichtbar</small></div><div class="kpi"><span>Abgeschlossene Prüfungen</span><strong>${completed.length}</strong><small>freigegeben oder abgelehnt</small></div><div class="kpi"><span>Pflicht-Workflow</span><strong>3</strong><small>AA · VA · BA</small></div></div><div class="card"><div class="card-head"><div><h2>Meine Aufgaben</h2><p>Der Status ist nur eine Information. Über „Prüfen“ öffnen Sie die eigentliche Prüfung mit PDF, Anmerkung, Freigabe und Ablehnung.</p></div></div>${mine.length ? `<div class="task-list">${mine.map(t => taskRow(t, true)).join("")}</div>` : emptyState("Keine Aufgabe für Sie", "Ihnen ist aktuell kein Dokument zur Prüfung/Freigabe zugewiesen.")}</div><div class="card"><div class="card-head"><div><h2>Alle laufenden Workflows</h2><p>Übersicht der gestarteten Dokumentenfreigaben.</p></div></div>${open.length ? `<div class="task-list">${open.map(t => taskRow(t, false)).join("")}</div>` : emptyState("Keine laufenden Workflows", "Beim Anlegen eines Dokuments kann ein Workflow gestartet werden.")}</div>`;
 }
 function renderDeadlines() {
   setHead("Fristen & Wiedervorlagen", "Befristungen und regelmäßige Prüfungen im Blick behalten.");
   const docs = getVisibleDocumentsForUser({ ...currentProfile, uid: currentUser?.uid }).filter(d => !d.archived && d.review && d.review !== "–").sort((a,b) => String(a.review).localeCompare(String(b.review)));
-  content.innerHTML = `<div class="info-strip">Neben Dokumenten sollen hier später auch <strong>befristete Bescheide, Steuerbefreiungen, Zertifikate, Verträge oder Genehmigungen</strong> mit automatischen Erinnerungen überwacht werden.</div><div class="card"><div class="card-head"><div><h2>Aktive Wiedervorlagen</h2><p>Aus den bereits eingestellten Dokumenten.</p></div></div>${docs.length ? `<div class="task-list">${docs.map(d => `<div class="task"><div class="task-icon">◷</div><div><strong>${esc(d.id)} · ${esc(d.title)}</strong><span>${esc(d.company)} · ${esc(d.area)}</span></div><div class="deadline">${fmtDate(d.review)}</div></div>`).join("")}</div>` : emptyState("Noch keine Wiedervorlagen", "Eine Wiedervorlage entsteht, sobald beim Dokument ein Prüfdatum eingetragen wird.")}</div>`;
+  content.innerHTML = `<div class="info-strip">Neben Dokumenten sollen hier später auch <strong>befristete Bescheide, Steuerbefreiungen, Zertifikate, Verträge oder Genehmigungen</strong> mit automatischen Erinnerungen überwacht werden.</div><div class="card"><div class="card-head"><div><h2>Aktive Wiedervorlagen</h2><p>Aus den bereits eingestellten Dokumenten.</p></div></div>${docs.length ? `<div class="task-list">${docs.map(d => `<div class="task"><div class="task-icon">◷</div><div><strong>${esc(displayDocNo(d))}${displayDocNo(d) !== "–" ? " · " : ""}${esc(d.title)}</strong><span>${esc(d.company)} · ${esc(d.area)}</span></div><div class="deadline">${fmtDate(d.review)}</div></div>`).join("")}</div>` : emptyState("Noch keine Wiedervorlagen", "Eine Wiedervorlage entsteht, sobald beim Dokument ein Prüfdatum eingetragen wird.")}</div>`;
 }
 
 function renderAreas() {
@@ -240,7 +259,7 @@ function renderArchive() {
 }
 function renderSettings() {
   setHead("Systemeinstellungen", "Dokumentarten und Workflow-Grundregeln.");
-  content.innerHTML = `<div class="three-col"><div class="card"><h2>Pflicht-Workflow</h2><p class="muted"><strong>Arbeitsanweisung</strong><br><strong>Verfahrensanweisung</strong><br><strong>Betriebsanweisung</strong><br><br>Diese Dokumentarten können nicht ohne Freigabeworkflow veröffentlicht werden.</p></div><div class="card"><h2>Optionaler Workflow</h2><p class="muted">Bei allen anderen Dokumentarten kann beim Hochladen freiwillig ein Kollege für Prüfung/Freigabe ausgewählt werden.</p></div><div class="card"><h2>Dateiupload</h2><p class="muted">Dateien können ausgewählt oder direkt in die Uploadfläche gezogen und abgelegt werden.</p></div></div>`;
+  content.innerHTML = `<div class="three-col"><div class="card"><h2>Pflicht-Workflow</h2><p class="muted"><strong>Arbeitsanweisung</strong><br><strong>Verfahrensanweisung</strong><br><strong>Betriebsanweisung</strong><br><br>Diese Dokumentarten können nicht ohne Freigabeworkflow veröffentlicht werden.</p></div><div class="card"><h2>Optionaler Workflow</h2><p class="muted">Bei allen anderen Dokumentarten kann beim Hochladen freiwillig ein Kollege für Prüfung/Freigabe ausgewählt werden.</p></div><div class="card"><h2>QM-Endfreigabe</h2><p class="muted">Nummerierungspflichtige Dokumente werden nach der fachlichen Prüfung automatisch an den Benutzer <strong>QM</strong> weitergeleitet. Nur QM vergibt die endgültige Dokumentnummer und veröffentlicht.</p></div></div>`;
 }
 
 async function openDoc(id) {
@@ -256,7 +275,7 @@ async function openDoc(id) {
   const revise = creator && !d.archived && d.status !== "In Prüfung" ? `<button class="btn secondary" onclick="openRevisionDoc('${d.id}')">Dokument überarbeiten</button>` : "";
   const sourceButton = creator && canAccessOriginal(d, actor) ? `<button class="btn secondary" onclick="editCurrentDoc('${d.id}')">Dokument bearbeiten</button>` : "";
   const pdfButton = canAccessPdf(d, actor) ? `<button class="btn" onclick="openPdfCurrentDoc('${d.id}')">Dokument öffnen</button>` : "";
-  modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>${esc(d.id)} · ${esc(d.title)}</h2><p>${esc(d.type)} · Version ${esc(d.version)}</p></div><button class="close-btn" onclick="closeModal()">×</button></div><div class="detail-grid"><div class="detail-item"><span>Erstellt von</span><strong>${esc(d.createdBy || "–")}</strong></div><div class="detail-item"><span>Erstellt am</span><strong>${fmtDateTime(d.createdAt)}</strong></div><div class="detail-item"><span>Unternehmen</span><strong>${esc(d.company)}</strong></div><div class="detail-item"><span>Bereich</span><strong>${esc(d.area)}</strong></div><div class="detail-item"><span>Status</span><strong>${esc(d.status)}</strong></div><div class="detail-item"><span>Originaldatei</span><strong>${creator ? `${esc(d.fileName)} · ${humanSize(d.fileSize)}` : "Nur für den Ersteller sichtbar"}</strong></div><div class="detail-item"><span>PDF-Lesefassung</span><strong>${esc(d.pdfFileName || (d.fileType === "application/pdf" ? d.fileName : "PDF-Lesefassung"))}</strong></div><div class="detail-item"><span>Nächste Prüfung</span><strong>${fmtDate(d.review)}</strong></div><div class="detail-item"><span>Workflow</span><strong>${d.workflowEnabled ? `Ja · ${esc(d.workflowAssignee)}` : "Nein"}</strong></div></div><div class="info-strip"><strong>Zugriffsregel:</strong> „Dokument öffnen“ zeigt die PDF-Lesefassung. Nur der Ersteller erhält über „Dokument bearbeiten“ die hochgeladene Originaldatei zur Bearbeitung.</div>${d.note ? `<p style="font-size:12px;line-height:1.55">${esc(d.note)}</p>` : ""}<h3 style="font-size:13px">Historie</h3><div class="timeline">${history || '<div class="timeline-item"><strong>Noch keine Historie</strong></div>'}</div><div class="modal-footer">${adminDelete}${adminArchive}${editMeta}${revise}${sourceButton}${pdfButton}</div></div>`;
+  modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>${esc(displayDocNo(d))}${displayDocNo(d) !== "–" ? " · " : ""}${esc(d.title)}</h2><p>${esc(d.type)} · Version ${esc(d.version)}</p></div><button class="close-btn" onclick="closeModal()">×</button></div><div class="detail-grid"><div class="detail-item"><span>Dokumentnummer</span><strong>${esc(displayDocNo(d))}</strong></div><div class="detail-item"><span>Erstellt von</span><strong>${esc(d.createdBy || "–")}</strong></div><div class="detail-item"><span>Erstellt am</span><strong>${fmtDateTime(d.createdAt)}</strong></div><div class="detail-item"><span>Unternehmen</span><strong>${esc(d.company)}</strong></div><div class="detail-item"><span>Bereich</span><strong>${esc(d.area)}</strong></div><div class="detail-item"><span>Status</span><strong>${esc(d.status)}</strong></div><div class="detail-item"><span>Originaldatei</span><strong>${creator ? `${esc(d.fileName)} · ${humanSize(d.fileSize)}` : "Nur für den Ersteller sichtbar"}</strong></div><div class="detail-item"><span>PDF-Lesefassung</span><strong>${esc(d.pdfFileName || (d.fileType === "application/pdf" ? d.fileName : "PDF-Lesefassung"))}</strong></div><div class="detail-item"><span>Nächste Prüfung</span><strong>${fmtDate(d.review)}</strong></div><div class="detail-item"><span>Workflow</span><strong>${d.workflowEnabled ? `Ja · ${esc(d.workflowAssignee)}` : "Nein"}</strong></div></div><div class="info-strip"><strong>Zugriffsregel:</strong> „Dokument öffnen“ zeigt die PDF-Lesefassung. Nur der Ersteller erhält über „Dokument bearbeiten“ die hochgeladene Originaldatei zur Bearbeitung.</div>${d.note ? `<p style="font-size:12px;line-height:1.55">${esc(d.note)}</p>` : ""}<h3 style="font-size:13px">Historie</h3><div class="timeline">${history || '<div class="timeline-item"><strong>Noch keine Historie</strong></div>'}</div><div class="modal-footer">${adminDelete}${adminArchive}${editMeta}${revise}${sourceButton}${pdfButton}</div></div>`;
   modal.showModal();
 }
 
@@ -264,15 +283,17 @@ function openNewDoc() {
   pendingUploadFile = null;
   pendingPdfFile = null;
   const defaultType = DOCUMENT_TYPES[0];
-  modalContent.innerHTML = `<form id="new-doc-form" class="modal-box"><div class="modal-head"><div><h2>Neues Dokument anlegen</h2><p>Datei hochladen und Dokumentenlenkung festlegen.</p></div><button class="close-btn" type="button" onclick="closeModal()">×</button></div><div class="form-grid"><label class="field"><span>Dokumentart</span><select id="doc-type">${DOCUMENT_TYPES.map(x => `<option>${esc(x)}</option>`).join("")}</select></label><label class="field"><span>Dokumentnummer</span><input id="doc-number" value="${generateDocumentNumber(defaultType)}" readonly></label><label class="field full"><span>Titel *</span><input id="doc-title" required placeholder="Titel des Dokuments"></label><label class="field"><span>Unternehmen</span><select id="doc-company">${companies.slice(1).concat(["Alle Unternehmen"]).map(x => `<option>${esc(x)}</option>`).join("")}</select></label><label class="field"><span>Bereich</span><select id="doc-area">${areas.map(x => `<option ${x === "Allgemein" ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label><label class="field"><span>Version</span><input id="doc-version" value="1.0"></label><label class="field"><span>Nächste Prüfung / Wiedervorlage</span><input id="doc-review" type="date"></label><label class="field full"><span>Bemerkung</span><textarea id="doc-note" placeholder="Optionaler Hinweis zum Dokument"></textarea></label></div><div class="workflow-config" id="workflow-config"><div class="workflow-config-head"><div><strong>Freigabeworkflow</strong><small id="workflow-rule-text"></small></div><label class="switch-line"><input id="workflow-enabled" type="checkbox" checked><span>Workflow starten</span></label></div><label class="field"><span>Aufgabe zuweisen an *</span><select id="workflow-assignee"><option value="">Kollegen auswählen …</option>${colleagues.map(c => `<option value="${esc(c.id)}">${esc(c.name)}${c.email ? ` · ${esc(c.email)}` : ""}</option>`).join("")}</select><small class="field-hint">Die Aufgabe erscheint beim ausgewählten Kollegen nach der Anmeldung im Dashboard.</small></label></div><div class="upload-section"><span class="upload-label">Originaldatei *</span><div id="drop-zone" class="drop-zone" tabindex="0"><div class="drop-icon">⇧</div><strong>Originaldatei hier hineinziehen und ablegen</strong><span>oder</span><button type="button" class="btn secondary" id="choose-file-btn">Originaldatei auswählen</button><input id="doc-file" type="file" hidden><div id="file-selected" class="file-selected">Noch keine Originaldatei ausgewählt</div></div></div><div class="upload-section"><span class="upload-label">PDF-Lesefassung</span><div id="pdf-drop-zone" class="drop-zone" tabindex="0"><div class="drop-icon">PDF</div><strong>PDF hier hineinziehen und ablegen</strong><span>oder</span><button type="button" class="btn secondary" id="choose-pdf-btn">PDF auswählen</button><input id="doc-pdf" type="file" accept="application/pdf,.pdf" hidden><div id="pdf-selected" class="file-selected">Nur erforderlich, wenn die Originaldatei kein PDF ist.</div></div></div><div class="modal-footer"><button class="btn secondary" type="button" onclick="closeModal()">Abbrechen</button><button class="btn" type="submit">Dokument anlegen</button></div></form>`;
+  modalContent.innerHTML = `<form id="new-doc-form" class="modal-box"><div class="modal-head"><div><h2>Neues Dokument anlegen</h2><p>Datei hochladen und Dokumentenlenkung festlegen.</p></div><button class="close-btn" type="button" onclick="closeModal()">×</button></div><div class="form-grid"><label class="field"><span>Dokumentart</span><select id="doc-type">${DOCUMENT_TYPES.map(x => `<option>${esc(x)}</option>`).join("")}</select></label><label class="field"><span>Dokumentnummer</span><input id="doc-number" value="" readonly placeholder="Vergabe nach Freigabe durch QM"><small class="field-hint">Die endgültige Nummer wird ausschließlich durch QM vergeben.</small></label><label class="field"><span>Nummerierung</span><label class="switch-line inline-switch"><input id="number-required" type="checkbox" checked><span>Dokumentnummer erforderlich</span></label></label><label class="field full"><span>Titel *</span><input id="doc-title" required placeholder="Titel des Dokuments"></label><label class="field"><span>Unternehmen</span><select id="doc-company">${companies.slice(1).concat(["Alle Unternehmen"]).map(x => `<option>${esc(x)}</option>`).join("")}</select></label><label class="field"><span>Bereich</span><select id="doc-area">${areas.map(x => `<option ${x === "Allgemein" ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label><label class="field"><span>Version</span><input id="doc-version" value="1.0"></label><label class="field"><span>Nächste Prüfung / Wiedervorlage</span><input id="doc-review" type="date"></label><label class="field full"><span>Bemerkung</span><textarea id="doc-note" placeholder="Optionaler Hinweis zum Dokument"></textarea></label></div><div class="workflow-config" id="workflow-config"><div class="workflow-config-head"><div><strong>Freigabeworkflow</strong><small id="workflow-rule-text"></small></div><label class="switch-line"><input id="workflow-enabled" type="checkbox" checked><span>Workflow starten</span></label></div><label class="field"><span>Aufgabe zuweisen an *</span><select id="workflow-assignee"><option value="">Kollegen auswählen …</option>${colleagues.map(c => `<option value="${esc(c.id)}">${esc(c.name)}${c.email ? ` · ${esc(c.email)}` : ""}</option>`).join("")}</select><small class="field-hint">Die Aufgabe erscheint beim ausgewählten Kollegen nach der Anmeldung im Dashboard.</small></label></div><div class="upload-section"><span class="upload-label">Originaldatei *</span><div id="drop-zone" class="drop-zone" tabindex="0"><div class="drop-icon">⇧</div><strong>Originaldatei hier hineinziehen und ablegen</strong><span>oder</span><button type="button" class="btn secondary" id="choose-file-btn">Originaldatei auswählen</button><input id="doc-file" type="file" hidden><div id="file-selected" class="file-selected">Noch keine Originaldatei ausgewählt</div></div></div><div class="upload-section"><span class="upload-label">PDF-Lesefassung</span><div id="pdf-drop-zone" class="drop-zone" tabindex="0"><div class="drop-icon">PDF</div><strong>PDF hier hineinziehen und ablegen</strong><span>oder</span><button type="button" class="btn secondary" id="choose-pdf-btn">PDF auswählen</button><input id="doc-pdf" type="file" accept="application/pdf,.pdf" hidden><div id="pdf-selected" class="file-selected">Nur erforderlich, wenn die Originaldatei kein PDF ist.</div></div></div><div class="modal-footer"><button class="btn secondary" type="button" onclick="closeModal()">Abbrechen</button><button class="btn" type="submit">Dokument anlegen</button></div></form>`;
   modal.showModal();
   bindNewDocumentForm();
 }
 function bindNewDocumentForm() {
-  const type = document.querySelector("#doc-type"), enabled = document.querySelector("#workflow-enabled"), assignee = document.querySelector("#workflow-assignee"), rule = document.querySelector("#workflow-rule-text"), number = document.querySelector("#doc-number");
+  const type = document.querySelector("#doc-type"), enabled = document.querySelector("#workflow-enabled"), assignee = document.querySelector("#workflow-assignee"), rule = document.querySelector("#workflow-rule-text"), number = document.querySelector("#doc-number"), numberRequired = document.querySelector("#number-required");
   const updateRule = () => {
     const mandatory = MANDATORY_WORKFLOW_TYPES.has(type.value);
-    number.value = generateDocumentNumber(type.value);
+    number.value = "";
+    numberRequired.checked = mandatory ? true : numberRequired.checked;
+    numberRequired.disabled = mandatory;
     enabled.checked = mandatory ? true : enabled.checked;
     enabled.disabled = mandatory;
     rule.textContent = mandatory ? "Für diese Dokumentart ist der Workflow zwingend erforderlich." : "Für diese Dokumentart kann der Workflow optional gestartet werden.";
@@ -313,16 +334,17 @@ async function submitNewDocument(e) {
   const type = document.querySelector("#doc-type").value;
   const workflowMandatory = MANDATORY_WORKFLOW_TYPES.has(type);
   const workflowEnabled = workflowMandatory || document.querySelector("#workflow-enabled").checked;
+  const numberRequired = document.querySelector("#number-required").checked;
   const assigneeId = document.querySelector("#workflow-assignee").value.trim();
   const assignee = colleagues.find(c => c.id === assigneeId) || null;
   if (!document.querySelector("#doc-title").value.trim()) return toast("Bitte einen Titel eingeben.");
   if (!pendingUploadFile) return toast("Bitte eine Datei auswählen oder hineinziehen.");
   if (workflowEnabled && !assignee) return toast("Bitte einen Kollegen für die Workflow-Aufgabe auswählen.");
+  if (numberRequired && !qmUser) return toast("Der Benutzer ‚QM‘ wurde noch nicht gefunden. Bitte den QM-Zugang zuerst im TP-Personalmanagement anlegen und für das Managementportal freischalten.");
   const sourceIsPdf = pendingUploadFile && (pendingUploadFile.type === "application/pdf" || /\.pdf$/i.test(pendingUploadFile.name || ""));
   if (!sourceIsPdf && !pendingPdfFile) return toast("Bitte zusätzlich eine PDF-Lesefassung hochladen.");
   try {
     const doc = await createDocument({
-      id: document.querySelector("#doc-number").value,
       title: document.querySelector("#doc-title").value,
       type,
       company: document.querySelector("#doc-company").value,
@@ -334,13 +356,19 @@ async function submitNewDocument(e) {
       createdBy: currentProfile.name || currentProfile.email || "",
       workflowMandatory,
       workflowEnabled,
+      numberRequired,
       workflowAssignee: assignee?.name || assignee?.email || "",
       workflowAssigneeId: assignee?.id || "",
       createdById: currentUser?.uid || "",
     }, pendingUploadFile, pendingPdfFile);
-    if (workflowEnabled) createWorkflowTask(doc, assignee, currentProfile.name || currentProfile.email || "", currentUser?.uid || "");
+    if (workflowEnabled) {
+      createWorkflowTask(doc, assignee, currentProfile.name || currentProfile.email || "", currentUser?.uid || "");
+    } else if (numberRequired) {
+      const qmDoc = sendDocumentToQm(doc.id, qmUser, currentProfile.name || currentProfile.email || "");
+      createQmWorkflowTask(qmDoc, qmUser, currentProfile.name || currentProfile.email || "", currentUser?.uid || "");
+    }
     closeModal();
-    toast(workflowEnabled ? "Dokument hochgeladen und Workflow gestartet." : "Dokument hochgeladen und direkt veröffentlicht.");
+    toast(workflowEnabled ? "Dokument hochgeladen und Workflow gestartet." : numberRequired ? "Dokument hochgeladen und an QM zur Nummernvergabe weitergeleitet." : "Dokument hochgeladen und direkt veröffentlicht.");
     render("documents");
   } catch (err) {
     console.error(err); toast(err.message || "Dokument konnte nicht angelegt werden.");
@@ -352,20 +380,23 @@ function openEditDoc(id) {
   const actor = { ...currentProfile, uid: currentUser?.uid };
   const creator = isDocumentCreator(d, actor);
   const admin = currentProfile?.role === "admin";
+  const qm = isQm();
   if (!creator && !admin) return toast("Sie dürfen die Dokumentdaten nicht bearbeiten.");
   const editAreas = areas.includes(d.area) ? areas : [d.area, ...areas];
-  modalContent.innerHTML = `<form id="edit-doc-form" class="modal-box"><div class="modal-head"><div><h2>${esc(d.id)} bearbeiten</h2><p>Metadaten anpassen${admin ? " und als Admin die Dokumentnummer korrigieren" : ""}.</p></div><button class="close-btn" type="button" onclick="closeModal()">×</button></div><div class="form-grid"><label class="field"><span>Dokumentnummer</span><input id="edit-number" value="${esc(d.id)}" ${admin ? "" : "readonly"}></label><label class="field"><span>Version</span><input id="edit-version" value="${esc(d.version)}"></label><label class="field full"><span>Titel</span><input id="edit-title" value="${esc(d.title)}" required></label><label class="field"><span>Unternehmen</span><select id="edit-company">${companies.slice(1).concat(["Alle Unternehmen"]).map(x => `<option ${x===d.company?'selected':''}>${esc(x)}</option>`).join("")}</select></label><label class="field"><span>Bereich</span><select id="edit-area">${editAreas.map(x => `<option ${x===d.area?'selected':''}>${esc(x)}</option>`).join("")}</select></label><label class="field"><span>Nächste Prüfung</span><input id="edit-review" type="date" value="${d.review && d.review !== '–' ? esc(d.review) : ''}"></label><label class="field full"><span>Bemerkung</span><textarea id="edit-note">${esc(d.note || '')}</textarea></label></div><div class="modal-footer"><button class="btn secondary" type="button" onclick="closeModal()">Abbrechen</button><button class="btn" type="submit">Änderungen speichern</button></div></form>`;
+  modalContent.innerHTML = `<form id="edit-doc-form" class="modal-box"><div class="modal-head"><div><h2>${esc(displayDocNo(d))}${displayDocNo(d) !== "–" ? " · " : ""}${esc(d.title)} bearbeiten</h2><p>Metadaten anpassen${qm ? " und als QM die Dokumentnummer verwalten" : ""}.</p></div><button class="close-btn" type="button" onclick="closeModal()">×</button></div><div class="form-grid"><label class="field"><span>Dokumentnummer</span><input id="edit-number" value="${esc(displayDocNo(d) === "–" ? "" : d.id)}" ${qm ? "" : "readonly"} placeholder="Vergabe durch QM"></label><label class="field"><span>Version</span><input id="edit-version" value="${esc(d.version)}"></label><label class="field full"><span>Titel</span><input id="edit-title" value="${esc(d.title)}" required></label><label class="field"><span>Unternehmen</span><select id="edit-company">${companies.slice(1).concat(["Alle Unternehmen"]).map(x => `<option ${x===d.company?'selected':''}>${esc(x)}</option>`).join("")}</select></label><label class="field"><span>Bereich</span><select id="edit-area">${editAreas.map(x => `<option ${x===d.area?'selected':''}>${esc(x)}</option>`).join("")}</select></label><label class="field"><span>Nächste Prüfung</span><input id="edit-review" type="date" value="${d.review && d.review !== '–' ? esc(d.review) : ''}"></label><label class="field full"><span>Bemerkung</span><textarea id="edit-note">${esc(d.note || '')}</textarea></label></div><div class="modal-footer"><button class="btn secondary" type="button" onclick="closeModal()">Abbrechen</button><button class="btn" type="submit">Änderungen speichern</button></div></form>`;
   modal.showModal();
   document.querySelector("#edit-doc-form").onsubmit = async e => {
     e.preventDefault();
     try {
       const oldId = id;
       let newId = oldId;
-      if (admin) {
-        newId = document.querySelector("#edit-number").value.trim();
-        if (newId !== oldId) {
+      if (qm) {
+        const entered = document.querySelector("#edit-number").value.trim();
+        if (entered && entered !== oldId) {
+          newId = entered;
           await renameDocumentNumber(oldId, newId, currentProfile.name || currentProfile.email || "");
           renameWorkflowDocument(oldId, newId);
+          markDocumentNumberAssigned(newId, currentProfile.name || currentProfile.email || "");
         }
       }
       updateDocumentMetadata(newId, { title: document.querySelector("#edit-title").value, company: document.querySelector("#edit-company").value, area: document.querySelector("#edit-area").value, version: document.querySelector("#edit-version").value, review: document.querySelector("#edit-review").value || "–", note: document.querySelector("#edit-note").value }, currentProfile.name || currentProfile.email || "");
@@ -380,28 +411,86 @@ function openReviewTask(taskId) {
   if (!mine.some(t => t.id === taskId)) return toast("Diese Prüfaufgabe ist Ihnen nicht zugewiesen.");
   const d = getDocument(task.documentId);
   if (!d) return toast("Das zugehörige Dokument wurde nicht gefunden.");
-  modalContent.innerHTML = `<div class="modal-box review-modal"><div class="modal-head"><div><h2>Dokument prüfen</h2><p>${esc(d.id)} · ${esc(d.title)}</p></div><button class="close-btn" type="button" onclick="closeModal()">×</button></div><div class="review-summary"><div><span>Dokumentart</span><strong>${esc(d.type)}</strong></div><div><span>Ersteller</span><strong>${esc(d.createdBy || "–")}</strong></div><div><span>Version</span><strong>${esc(d.version)}</strong></div><div><span>Status</span><strong>Zu prüfen</strong></div></div><div class="info-strip">Zur Prüfung wird ausschließlich die PDF-Lesefassung geöffnet. Die Originaldatei bleibt beim Ersteller.</div><div class="review-open"><button class="btn" type="button" onclick="openPdfCurrentDoc('${d.id}')">Dokument öffnen</button></div><label class="field full review-note"><span>Anmerkung / Hinweis</span><textarea id="review-note" placeholder="Optional bei Freigabe. Bei Ablehnung muss hier zwingend ein Grund eingetragen werden."></textarea><small class="field-hint">Der Text wird in der Dokumenthistorie gespeichert und ist für den Ersteller nachvollziehbar.</small></label><div class="modal-footer"><button class="btn secondary" type="button" onclick="closeModal()">Abbrechen</button><button class="btn danger" type="button" onclick="finishReview('${task.id}','${d.id}','reject')">Ablehnen</button><button class="btn" type="button" onclick="finishReview('${task.id}','${d.id}','approve')">Freigeben</button></div></div>`;
+  modalContent.innerHTML = `<div class="modal-box review-modal"><div class="modal-head"><div><h2>Dokument prüfen</h2><p>${esc(displayDocNo(d))}${displayDocNo(d) !== "–" ? " · " : ""}${esc(d.title)}</p></div><button class="close-btn" type="button" onclick="closeModal()">×</button></div><div class="review-summary"><div><span>Dokumentart</span><strong>${esc(d.type)}</strong></div><div><span>Ersteller</span><strong>${esc(d.createdBy || "–")}</strong></div><div><span>Version</span><strong>${esc(d.version)}</strong></div><div><span>Status</span><strong>Zu prüfen</strong></div></div><div class="info-strip">Zur Prüfung wird ausschließlich die PDF-Lesefassung geöffnet. Die Originaldatei bleibt beim Ersteller.</div><div class="review-open"><button class="btn" type="button" onclick="openPdfCurrentDoc('${d.id}')">Dokument öffnen</button></div><label class="field full review-note"><span>Anmerkung / Hinweis</span><textarea id="review-note" placeholder="Optional bei Freigabe. Bei Ablehnung muss hier zwingend ein Grund eingetragen werden."></textarea><small class="field-hint">Der Text wird in der Dokumenthistorie gespeichert und ist für den Ersteller nachvollziehbar.</small></label><div class="modal-footer"><button class="btn secondary" type="button" onclick="closeModal()">Abbrechen</button><button class="btn danger" type="button" onclick="finishReview('${task.id}','${d.id}','reject')">Ablehnen</button><button class="btn" type="button" onclick="finishReview('${task.id}','${d.id}','approve')">Freigeben</button></div></div>`;
   modal.showModal();
 }
 
-function finishReview(taskId, docId, decision) {
+async function finishReview(taskId, docId, decision) {
   const note = document.querySelector("#review-note")?.value.trim() || "";
   if (decision === "reject" && !note) return toast("Bitte bei einer Ablehnung zwingend einen Grund angeben.");
   const by = currentProfile.name || currentProfile.email || "";
   decideWorkflowTask(taskId, decision, by, note);
-  updateDocumentStatus(docId, decision === "reject" ? "Abgelehnt" : "Freigegeben", by, note);
-  closeModal();
-  toast(decision === "reject" ? "Dokument wurde mit Begründung zur Überarbeitung zurückgegeben." : "Dokument wurde freigegeben und veröffentlicht.");
+  const d = getDocument(docId);
+  if (!d) return toast("Dokument wurde nicht gefunden.");
+  if (decision === "reject") {
+    updateDocumentStatus(docId, "Abgelehnt", by, note);
+    closeModal();
+    toast("Dokument wurde mit Begründung zur Überarbeitung zurückgegeben.");
+  } else if (d.numberRequired) {
+    if (!qmUser) return toast("QM-Benutzer wurde nicht gefunden. Bitte den QM-Zugang prüfen.");
+    const updated = sendDocumentToQm(docId, qmUser, by, note);
+    createQmWorkflowTask(updated, qmUser, updated.createdBy || by, updated.createdById || currentUser?.uid || "");
+    closeModal();
+    toast("Fachlich freigegeben. Das Dokument wurde an QM zur Nummernvergabe und Veröffentlichung weitergeleitet.");
+  } else {
+    updateDocumentStatus(docId, "Freigegeben", by, note);
+    closeModal();
+    toast("Dokument wurde freigegeben und veröffentlicht.");
+  }
   render(current === "dashboard" ? "dashboard" : "workflow");
+}
+
+function openQmTask(taskId) {
+  const task = getWorkflowTasks().find(t => t.id === taskId);
+  if (!task || task.status !== "Offen" || task.kind !== "qm") return toast("Diese QM-Aufgabe ist nicht mehr offen.");
+  const mine = getTasksForUser({ ...currentProfile, uid: currentUser?.uid });
+  if (!mine.some(t => t.id === taskId) || !isQm()) return toast("Diese Aufgabe ist ausschließlich dem QM-Benutzer zugewiesen.");
+  const d = getDocument(task.documentId);
+  if (!d) return toast("Das zugehörige Dokument wurde nicht gefunden.");
+  const suggestion = generateDocumentNumber(d.type);
+  modalContent.innerHTML = `<div class="modal-box review-modal"><div class="modal-head"><div><h2>QM-Endprüfung & Nummernvergabe</h2><p>${esc(d.title)} · ${esc(d.type)}</p></div><button class="close-btn" type="button" onclick="closeModal()">×</button></div><div class="review-summary"><div><span>Ersteller</span><strong>${esc(d.createdBy || "–")}</strong></div><div><span>Version</span><strong>${esc(d.version)}</strong></div><div><span>Unternehmen</span><strong>${esc(d.company)}</strong></div><div><span>Status</span><strong>QM-Prüfung</strong></div></div><div class="info-strip"><strong>QM-Schritt:</strong> Erst nach Vergabe der endgültigen Dokumentnummer und Klick auf „Veröffentlichen“ wird das Dokument für alle berechtigten Nutzer sichtbar.</div><div class="review-open"><button class="btn" type="button" onclick="openPdfCurrentDoc('${d.id}')">Dokument öffnen</button></div><label class="field full"><span>Dokumentnummer *</span><input id="qm-document-number" value="${esc(suggestion)}"><small class="field-hint">Vorschlag des Systems. QM kann die Nummer vor Veröffentlichung anpassen.</small></label><label class="field full review-note"><span>Hinweis / Anmerkung</span><textarea id="qm-note" placeholder="Optional bei Veröffentlichung. Bei Ablehnung muss ein Grund angegeben werden."></textarea></label><div class="modal-footer"><button class="btn secondary" type="button" onclick="closeModal()">Abbrechen</button><button class="btn danger" type="button" onclick="finishQmTask('${task.id}','${d.id}','reject')">Ablehnen</button><button class="btn" type="button" onclick="finishQmTask('${task.id}','${d.id}','publish')">Veröffentlichen</button></div></div>`;
+  modal.showModal();
+}
+
+async function finishQmTask(taskId, docId, decision) {
+  if (!isQm()) return toast("Nur der QM-Benutzer darf diesen Schritt abschließen.");
+  const note = document.querySelector("#qm-note")?.value.trim() || "";
+  const by = currentProfile.name || currentProfile.email || "QM";
+  if (decision === "reject") {
+    if (!note) return toast("Bitte bei einer Ablehnung zwingend einen Grund angeben.");
+    decideWorkflowTask(taskId, "reject", by, note);
+    updateDocumentStatus(docId, "Abgelehnt", by, note);
+    closeModal();
+    toast("Dokument wurde vom QM mit Begründung an den Ersteller zurückgegeben.");
+    return render(current === "dashboard" ? "dashboard" : "workflow");
+  }
+  const number = document.querySelector("#qm-document-number")?.value.trim() || "";
+  if (!number) return toast("Bitte eine endgültige Dokumentnummer vergeben.");
+  try {
+    let finalId = docId;
+    if (number !== docId) {
+      await renameDocumentNumber(docId, number, by);
+      renameWorkflowDocument(docId, number);
+      finalId = number;
+    }
+    markDocumentNumberAssigned(finalId, by);
+    updateDocumentStatus(finalId, "Freigegeben", by, note);
+    decideWorkflowTask(taskId, "publish", by, note);
+    closeModal();
+    toast("Dokumentnummer vergeben. Das Dokument wurde veröffentlicht.");
+    render(current === "dashboard" ? "dashboard" : "workflow");
+  } catch (err) {
+    toast(err.message || "Dokument konnte nicht veröffentlicht werden.");
+  }
 }
 
 function openRevisionDoc(id) {
   const d = getDocument(id); if (!d) return toast("Dokument wurde nicht gefunden.");
   const actor = { ...currentProfile, uid: currentUser?.uid };
   if (!isDocumentCreator(d, actor)) return toast("Nur der Ersteller darf neue Original- und PDF-Dateien hochladen.");
-  if (d.status === "In Prüfung") return toast("Während einer laufenden Prüfung können die Dateien nicht ausgetauscht werden.");
+  if (d.status === "In Prüfung" || d.status === "QM-Prüfung") return toast("Während einer laufenden Prüfung können die Dateien nicht ausgetauscht werden.");
   pendingUploadFile = null; pendingPdfFile = null;
-  modalContent.innerHTML = `<form id="revision-doc-form" class="modal-box"><div class="modal-head"><div><h2>${esc(d.id)} überarbeiten</h2><p>Überarbeitete Originaldatei und PDF-Lesefassung hochladen. Bei workflowpflichtigen Dokumenten wird die Prüfung erneut gestartet.</p></div><button class="close-btn" type="button" onclick="closeModal()">×</button></div><div class="form-grid"><label class="field"><span>Version</span><input id="revision-version" value="${esc(d.version)}"></label><label class="field"><span>Erneut prüfen lassen durch *</span><select id="revision-assignee"><option value="">Kollegen auswählen …</option>${colleagues.map(c => `<option value="${esc(c.id)}" ${c.id===d.workflowAssigneeId?'selected':''}>${esc(c.name)}${c.email ? ` · ${esc(c.email)}` : ""}</option>`).join("")}</select></label><label class="field full"><span>Bemerkung zur Überarbeitung</span><textarea id="revision-note" placeholder="Optional: Was wurde angepasst?"></textarea></label></div><div class="upload-section"><span class="upload-label">Überarbeitete Originaldatei *</span><div id="revision-source-zone" class="drop-zone"><div class="drop-icon">⇧</div><strong>Originaldatei hier hineinziehen und ablegen</strong><span>oder</span><button type="button" class="btn secondary" id="revision-source-btn">Originaldatei auswählen</button><input id="revision-source" type="file" hidden><div id="revision-source-selected" class="file-selected">Noch keine Datei ausgewählt</div></div></div><div class="upload-section"><span class="upload-label">Überarbeitete PDF-Lesefassung</span><div id="revision-pdf-zone" class="drop-zone"><div class="drop-icon">PDF</div><strong>PDF hier hineinziehen und ablegen</strong><span>oder</span><button type="button" class="btn secondary" id="revision-pdf-btn">PDF auswählen</button><input id="revision-pdf" type="file" accept="application/pdf,.pdf" hidden><div id="revision-pdf-selected" class="file-selected">Nur entbehrlich, wenn die Originaldatei selbst ein PDF ist.</div></div></div><div class="modal-footer"><button class="btn secondary" type="button" onclick="closeModal()">Abbrechen</button><button class="btn" type="submit">Neu einreichen</button></div></form>`;
+  modalContent.innerHTML = `<form id="revision-doc-form" class="modal-box"><div class="modal-head"><div><h2>${esc(displayDocNo(d))}${displayDocNo(d) !== "–" ? " · " : ""}${esc(d.title)} überarbeiten</h2><p>Überarbeitete Originaldatei und PDF-Lesefassung hochladen. Bei workflowpflichtigen Dokumenten wird die Prüfung erneut gestartet.</p></div><button class="close-btn" type="button" onclick="closeModal()">×</button></div><div class="form-grid"><label class="field"><span>Version</span><input id="revision-version" value="${esc(d.version)}"></label><label class="field"><span>Erneut prüfen lassen durch *</span><select id="revision-assignee"><option value="">Kollegen auswählen …</option>${colleagues.map(c => `<option value="${esc(c.id)}" ${c.id===d.workflowAssigneeId?'selected':''}>${esc(c.name)}${c.email ? ` · ${esc(c.email)}` : ""}</option>`).join("")}</select></label><label class="field full"><span>Bemerkung zur Überarbeitung</span><textarea id="revision-note" placeholder="Optional: Was wurde angepasst?"></textarea></label></div><div class="upload-section"><span class="upload-label">Überarbeitete Originaldatei *</span><div id="revision-source-zone" class="drop-zone"><div class="drop-icon">⇧</div><strong>Originaldatei hier hineinziehen und ablegen</strong><span>oder</span><button type="button" class="btn secondary" id="revision-source-btn">Originaldatei auswählen</button><input id="revision-source" type="file" hidden><div id="revision-source-selected" class="file-selected">Noch keine Datei ausgewählt</div></div></div><div class="upload-section"><span class="upload-label">Überarbeitete PDF-Lesefassung</span><div id="revision-pdf-zone" class="drop-zone"><div class="drop-icon">PDF</div><strong>PDF hier hineinziehen und ablegen</strong><span>oder</span><button type="button" class="btn secondary" id="revision-pdf-btn">PDF auswählen</button><input id="revision-pdf" type="file" accept="application/pdf,.pdf" hidden><div id="revision-pdf-selected" class="file-selected">Nur entbehrlich, wenn die Originaldatei selbst ein PDF ist.</div></div></div><div class="modal-footer"><button class="btn secondary" type="button" onclick="closeModal()">Abbrechen</button><button class="btn" type="submit">Neu einreichen</button></div></form>`;
   modal.showModal();
   const bindZone = (zoneId, inputId, btnId, setter) => {
     const zone=document.querySelector(zoneId), input=document.querySelector(inputId), btn=document.querySelector(btnId);
@@ -428,7 +517,8 @@ function openRevisionDoc(id) {
     try {
       const updated=await replaceDocumentFiles(id,pendingUploadFile,pendingPdfFile,{version:document.querySelector("#revision-version").value||d.version,note:document.querySelector("#revision-note").value,workflowEnabled,workflowAssignee:workflowEnabled ? (assignee?.name||assignee?.email||"") : "",workflowAssigneeId:workflowEnabled ? (assignee?.id||"") : ""},currentProfile.name||currentProfile.email||"");
       if(workflowEnabled) createWorkflowTask(updated,assignee,currentProfile.name||currentProfile.email||"",currentUser?.uid||"");
-      closeModal(); toast(workflowEnabled ? "Überarbeitete Dokumente hochgeladen. Der Workflow wurde neu gestartet." : "Überarbeitete Dokumente hochgeladen und veröffentlicht."); render("dashboard");
+      else if(d.numberRequired) { if(!qmUser) return toast("QM-Benutzer wurde nicht gefunden."); const qmDoc=sendDocumentToQm(updated.id,qmUser,currentProfile.name||currentProfile.email||""); createQmWorkflowTask(qmDoc,qmUser,currentProfile.name||currentProfile.email||"",currentUser?.uid||""); }
+      closeModal(); toast(workflowEnabled ? "Überarbeitete Dokumente hochgeladen. Der Workflow wurde neu gestartet." : d.numberRequired ? "Überarbeitete Dokumente hochgeladen und erneut an QM weitergeleitet." : "Überarbeitete Dokumente hochgeladen und veröffentlicht."); render("dashboard");
     } catch(err){toast(err.message||"Dokument konnte nicht neu eingereicht werden.");}
   };
 }
@@ -473,16 +563,17 @@ async function applyProfile(profile, user) {
   const settingsBtn = document.querySelector("#settings-link");
   if (settingsBtn) settingsBtn.style.display = profile.role === "admin" ? "" : "none";
   colleagues = profile.role === "employee" ? [] : await loadAssignableColleagues(profile, user);
+  qmUser = await loadQmUser();
   current = "dashboard";
   render("dashboard");
 }
 function showLogin(message = "") { currentProfile = null; currentUser = null; document.querySelector("#app-shell").classList.add("hidden"); document.querySelector("#login-page").classList.remove("hidden"); document.querySelector("#login-message").textContent = message; }
 async function showPortal(profile, user) { document.querySelector("#login-message").textContent = ""; document.querySelector("#login-page").classList.add("hidden"); document.querySelector("#app-shell").classList.remove("hidden"); await applyProfile(profile, user); }
 
-Object.assign(window, { render, openDoc, openNewDoc, openEditDoc, openReviewTask, finishReview, openRevisionDoc, closeModal, toast, archiveCurrentDoc, deleteCurrentDoc, editCurrentDoc, openPdfCurrentDoc });
+Object.assign(window, { render, openDoc, openNewDoc, openEditDoc, openReviewTask, finishReview, openQmTask, finishQmTask, openRevisionDoc, closeModal, toast, archiveCurrentDoc, deleteCurrentDoc, editCurrentDoc, openPdfCurrentDoc });
 document.querySelector("#settings-link").onclick = () => render("settings");
 document.querySelector("#logout-btn").onclick = () => logout();
-document.querySelector("#portal-info").onclick = () => { modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal</h2><p>Version 0.4</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Zentrale Plattform für Unternehmensdokumente, Freigabeworkflows, öffentliche Informationen, persönliche Dateien und freigegebene Arbeitsbereiche.</p><p style="font-size:12px;line-height:1.65"><strong>V0.4:</strong> Prüfungen erfolgen jetzt in einem eigenen Prüffenster mit PDF-Anzeige, Anmerkung, Freigabe und begründungspflichtiger Ablehnung. Ersteller können abgelehnte Dokumente überarbeiten und neu einreichen; Admins können Dokumentnummern korrigieren und Dokumente löschen.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Schließen</button></div></div>`; modal.showModal(); };
+document.querySelector("#portal-info").onclick = () => { modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal</h2><p>Version 0.5</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Zentrale Plattform für Unternehmensdokumente, Freigabeworkflows, öffentliche Informationen, persönliche Dateien und freigegebene Arbeitsbereiche.</p><p style="font-size:12px;line-height:1.65"><strong>V0.5:</strong> Nummerierungspflichtige Dokumente erhalten einen zusätzlichen QM-Schritt. Erst QM vergibt die endgültige Dokumentnummer und veröffentlicht das Dokument oder gibt es mit Hinweis an den Ersteller zurück.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Schließen</button></div></div>`; modal.showModal(); };
 document.querySelector("#personalmanagement-link").onclick = () => { const url = localStorage.getItem("tpPersonalmanagementUrl") || ""; if (url) window.open(url, "_blank", "noopener"); else toast("Die produktive URL des TP-Personalmanagements wird hier noch hinterlegt."); };
 document.querySelector("#login-form").addEventListener("submit", async e => { e.preventDefault(); const msg = document.querySelector("#login-message"); msg.textContent = "Anmeldung läuft …"; try { await login(document.querySelector("#login-identifier").value, document.querySelector("#login-password").value); } catch (err) { console.error(err); msg.textContent = "Anmeldung nicht möglich. Bitte Zugangsdaten prüfen."; } });
 document.querySelector("#forgot-password-btn").onclick = async () => { try { await requestPasswordReset(document.querySelector("#login-identifier").value); toast("Passwort-Link wurde angefordert."); } catch (err) { toast(err.message || "Passwort-Link konnte nicht angefordert werden."); } };

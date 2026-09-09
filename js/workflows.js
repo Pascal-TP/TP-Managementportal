@@ -28,11 +28,12 @@ function matchesUser(task, profile, side = "assignee") {
   return Boolean(cb && (cb === name || cb === email));
 }
 
-export function createWorkflowTask(document, assignee, createdBy = "", createdById = "") {
+export function createWorkflowTask(document, assignee, createdBy = "", createdById = "", kind = "review") {
   const rows = readRows();
   const now = new Date().toISOString();
   const task = {
     id: `WF-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    kind,
     documentId: document.id,
     documentTitle: document.title,
     documentType: document.type,
@@ -49,6 +50,10 @@ export function createWorkflowTask(document, assignee, createdBy = "", createdBy
   rows.push(task);
   writeRows(rows);
   return task;
+}
+
+export function createQmWorkflowTask(document, qmUser, createdBy = "", createdById = "") {
+  return createWorkflowTask(document, qmUser, createdBy, createdById, "qm");
 }
 
 export function getWorkflowTasks() {
@@ -72,7 +77,7 @@ export function decideWorkflowTask(id, decision, completedBy = "", note = "") {
   const rows = readRows();
   const task = rows.find((x) => x.id === id);
   if (!task) return null;
-  task.status = decision === "reject" ? "Abgelehnt" : "Freigegeben";
+  task.status = decision === "reject" ? "Abgelehnt" : decision === "publish" ? "Veröffentlicht" : "Freigegeben";
   task.completedBy = completedBy;
   task.decisionNote = String(note || "").trim();
   task.updatedAt = new Date().toISOString();

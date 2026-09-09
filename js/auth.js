@@ -63,6 +63,28 @@ export function observeAuth(callback) {
 }
 
 
+export async function loadQmUser() {
+  const candidates = [
+    query(collection(db, "users"), where("name", "==", "QM")),
+    query(collection(db, "users"), where("email", "==", "qm@portal.local")),
+    query(collection(db, "users"), where("username", "==", "QM")),
+    query(collection(db, "users"), where("username", "==", "qm")),
+  ];
+  for (const q of candidates) {
+    try {
+      const snap = await getDocs(q);
+      const hit = snap.docs.find(d => d.data()?.active !== false && d.data()?.role === "admin");
+      if (hit) {
+        const v = hit.data() || {};
+        return { id: hit.id, name: String(v.name || v.email || "QM").trim(), email: v.email || "", role: v.role || "admin" };
+      }
+    } catch (err) {
+      console.warn("QM-Benutzer konnte über eine Suchvariante nicht geladen werden:", err);
+    }
+  }
+  return null;
+}
+
 export async function loadAssignableColleagues(profile, user) {
   const result = new Map();
   const addSnap = snap => {

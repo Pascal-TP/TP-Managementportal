@@ -81,7 +81,7 @@ export function isDocumentReviewer(document, user = {}) {
 export function canViewDocument(document, user = {}) {
   if (!document || document.archived === true) return false;
   if (document.status === "Freigegeben") return true;
-  return isDocumentCreator(document, user) || isDocumentReviewer(document, user);
+  return isDocumentCreator(document, user) || isDocumentReviewer(document, user) || isDocumentQmReviewer(document, user);
 }
 
 export function canAccessOriginal(document, user = {}) {
@@ -91,7 +91,7 @@ export function canAccessOriginal(document, user = {}) {
 export function canAccessPdf(document, user = {}) {
   if (!document || document.archived === true) return false;
   if (document.status === "Freigegeben") return true;
-  return isDocumentCreator(document, user) || isDocumentReviewer(document, user);
+  return isDocumentCreator(document, user) || isDocumentReviewer(document, user) || isDocumentQmReviewer(document, user);
 }
 
 export function getVisibleDocumentsForUser(user = {}) {
@@ -111,6 +111,23 @@ export function generateDocumentNumber(type) {
     return Number.isFinite(n) ? Math.max(m, n) : m;
   }, 0);
   return `${prefix}.${String(max + 1).padStart(3, "0")}.01`;
+}
+
+export function generateTemporaryDocumentId() {
+  return `ENTW-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+export function getDisplayDocumentNumber(document) {
+  if (!document) return "–";
+  if (document.numberAssigned === false || String(document.id || "").startsWith("ENTW-")) return "–";
+  return document.id || "–";
+}
+
+export function isDocumentQmReviewer(document, user = {}) {
+  const u = userKey(user);
+  if (document?.qmAssigneeId && u.uid) return document.qmAssigneeId === u.uid;
+  const assigned = String(document?.qmAssignee || "").trim().toLowerCase();
+  return Boolean(assigned && (assigned === u.name || assigned === u.email));
 }
 
 function openDb() {
@@ -174,17 +191,21 @@ export async function createDocument(payload, sourceFile, pdfFile = null) {
 
   const rows = readMeta();
   const now = new Date().toISOString();
-  const id = payload.id || generateDocumentNumber(payload.type);
-  if (rows.some((d) => d.id === id)) throw new Error("Die Dokumentnummer ist bereits vorhanden.");
+  const id = payload.id || generateTemporaryDocumentId();
+  if (rows.some((d) => d.id === id)) throw new Error("Die interne Dokument-ID ist bereits vorhanden.");
+  const numberRequired = Boolean(payload.numberRequired);
+  const initialStatus = payload.workflowEnabled ? "In Prüfung" : numberRequired ? "QM-Prüfung" : "Freigegeben";
 
   const doc = {
     id,
+    numberRequired,
+    numberAssigned: !numberRequired,
     title: payload.title.trim(),
     type: payload.type,
     area: payload.area.trim() || "Allgemein",
     company: payload.company,
     version: payload.version || "1.0",
-    status: payload.workflowEnabled ? "In Prüfung" : "Freigegeben",
+    status: initialStatus,
     owner: payload.owner || "",
     review: payload.review || "–",
     note: payload.note?.trim() || "",
@@ -192,6 +213,8 @@ export async function createDocument(payload, sourceFile, pdfFile = null) {
     workflowMandatory: Boolean(payload.workflowMandatory),
     workflowAssignee: payload.workflowAssignee?.trim() || "",
     workflowAssigneeId: payload.workflowAssigneeId || "",
+    qmAssignee: "",
+    qmAssigneeId: "",
     fileName: sourceFile.name,
     fileType: sourceFile.type || "application/octet-stream",
     fileSize: sourceFile.size,
@@ -205,7 +228,7 @@ export async function createDocument(payload, sourceFile, pdfFile = null) {
     archived: false,
     history: [{
       at: now,
-      action: payload.workflowEnabled ? "Dokument eingestellt und Freigabeworkflow gestartet" : "Dokument eingestellt und veröffentlicht",
+      action: payload.workflowEnabled ? "Dokument eingestellt und Freigabeworkflow gestartet" : numberRequired ? "Dokument eingestellt und zur Nummernvergabe an QM weitergeleitet" : "Dokument eingestellt und veröffentlicht",
       by: payload.createdBy || "",
     }],
   };
@@ -266,14 +289,43 @@ export async function replaceDocumentFiles(id, sourceFile, pdfFile, payload = {}
   if (payload.workflowAssignee !== undefined) d.workflowAssignee = String(payload.workflowAssignee || "").trim();
   if (payload.workflowAssigneeId !== undefined) d.workflowAssigneeId = String(payload.workflowAssigneeId || "").trim();
   d.workflowEnabled = Boolean(payload.workflowEnabled ?? d.workflowEnabled);
-  d.status = d.workflowEnabled ? "In Prüfung" : "Freigegeben";
+  d.qmAssignee = "";
+  d.qmAssigneeId = "";
+  d.status = d.workflowEnabled ? "In Prüfung" : d.numberRequired ? "QM-Prüfung" : "Freigegeben";
   d.updatedAt = now;
   d.history = Array.isArray(d.history) ? d.history : [];
   d.history.unshift({
     at: now,
-    action: d.workflowEnabled ? "Dokument überarbeitet, Dateien ersetzt und Workflow neu gestartet" : "Dokument überarbeitet und neu veröffentlicht",
+    action: d.workflowEnabled ? "Dokument überarbeitet, Dateien ersetzt und Workflow neu gestartet" : d.numberRequired ? "Dokument überarbeitet und erneut an QM weitergeleitet" : "Dokument überarbeitet und neu veröffentlicht",
     by,
   });
+  writeMeta(rows);
+  return d;
+}
+
+export function sendDocumentToQm(id, qmUser, by = "", note = "") {
+  const rows = readMeta();
+  const d = rows.find((x) => x.id === id);
+  if (!d) return null;
+  d.status = "QM-Prüfung";
+  d.qmAssignee = String(qmUser?.name || qmUser?.email || "QM").trim();
+  d.qmAssigneeId = String(qmUser?.id || "").trim();
+  d.updatedAt = new Date().toISOString();
+  d.history = Array.isArray(d.history) ? d.history : [];
+  const suffix = note ? ` · Hinweis aus Prüfung: ${note}` : "";
+  d.history.unshift({ at: d.updatedAt, action: `Fachliche Prüfung abgeschlossen; an QM zur Nummernvergabe und Veröffentlichung weitergeleitet${suffix}`, by });
+  writeMeta(rows);
+  return d;
+}
+
+export function markDocumentNumberAssigned(id, by = "") {
+  const rows = readMeta();
+  const d = rows.find((x) => x.id === id);
+  if (!d) return null;
+  d.numberAssigned = true;
+  d.updatedAt = new Date().toISOString();
+  d.history = Array.isArray(d.history) ? d.history : [];
+  d.history.unshift({ at: d.updatedAt, action: "Dokumentnummer durch QM endgültig vergeben", by });
   writeMeta(rows);
   return d;
 }
