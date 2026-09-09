@@ -69,3 +69,32 @@ dialog{border:0;border-radius:15px;padding:0;width:min(760px,94vw);box-shadow:0 
 @media(max-width:1000px){.myfiles-explorer{grid-template-columns:220px minmax(0,1fr)}}
 @media(max-width:760px){.myfiles-explorer{grid-template-columns:1fr}.myfiles-tree-panel{display:none;position:static}.myfiles-tree-show{display:inline-flex}.myfiles-explorer:not(.tree-collapsed).tree-mobile-open .myfiles-tree-panel{display:block}.myfiles-tree{max-height:320px}}
 @media(max-width:760px){.myfiles-explorer:not(.tree-collapsed) .myfiles-tree-panel{display:block}.myfiles-explorer:not(.tree-collapsed) .myfiles-tree-show{display:none}}
+
+/* V0.9 – Sichtbarkeit von Dokumenten */
+.visibility-config{margin-top:16px;padding:16px;border:1px solid #dbe4ee;border-radius:12px;background:#f8fafc}
+.visibility-config-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+.visibility-config-head strong{display:block;color:#17324d;font-size:13px}
+.visibility-config-head small{display:block;margin-top:3px;color:#6d7f90;font-size:11px;line-height:1.4}
+.visibility-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.visibility-radio{display:flex;align-items:flex-start;gap:10px;padding:11px 12px;border:1px solid #dfe7ef;border-radius:10px;background:#fff;cursor:pointer}
+.visibility-radio input{flex:0 0 auto;margin-top:2px;accent-color:#173f6f}
+.visibility-radio span{display:block;min-width:0}
+.visibility-radio strong{display:block;color:#20384f;font-size:12px}
+.visibility-radio small{display:block;margin-top:2px;color:#718294;font-size:10.5px;line-height:1.35}
+.visibility-people{margin-top:12px;padding:12px;border:1px solid #dfe7ef;border-radius:10px;background:#fff}
+.visibility-people.hidden{display:none}
+.visibility-picker-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.visibility-picker-head input{min-width:0;flex:1;border:1px solid #ccd7e2;border-radius:8px;padding:9px 10px;font:inherit;font-size:12px;background:#fff}
+.visibility-picker-head span{flex:0 0 auto;color:#5f7285;font-size:11px;font-weight:700}
+.visibility-person-list{max-height:230px;overflow:auto;border:1px solid #e4eaf0;border-radius:8px;background:#fff}
+.visibility-person{display:flex;align-items:center;gap:10px;padding:9px 10px;border-bottom:1px solid #edf1f5;cursor:pointer}
+.visibility-person:last-child{border-bottom:0}
+.visibility-person:hover{background:#f8fafc}
+.visibility-person[hidden]{display:none}
+.visibility-person input{flex:0 0 auto;margin:0;accent-color:#173f6f}
+.visibility-person span{display:block;min-width:0}
+.visibility-person strong{display:block;color:#22384d;font-size:12px;font-weight:700}
+.visibility-person small{display:block;margin-top:1px;color:#7b8b9a;font-size:10.5px}
+.visibility-empty{padding:14px;color:#718294;font-size:11px;text-align:center}
+.visibility-people>.field-hint{display:block;margin-top:9px}
+@media(max-width:760px){.visibility-options{grid-template-columns:1fr}.visibility-picker-head{align-items:stretch;flex-direction:column}.visibility-picker-head span{align-self:flex-start}}
