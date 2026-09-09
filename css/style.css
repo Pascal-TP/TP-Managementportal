@@ -53,3 +53,8 @@ dialog{border:0;border-radius:15px;padding:0;width:min(760px,94vw);box-shadow:0 
 .rejection-card{border-color:#efd1d1;background:#fffdfd}.rejection-card .task-icon{background:#fae9e9;color:#a33}
 .review-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}.review-summary>div{border:1px solid var(--line);border-radius:9px;padding:10px;background:#fbfcfd}.review-summary span,.review-summary strong{display:block}.review-summary span{font-size:9px;text-transform:uppercase;color:var(--muted)}.review-summary strong{font-size:11px;margin-top:4px}.review-open{display:flex;justify-content:flex-start;margin:14px 0}.review-note{display:block;margin-top:14px}.review-note textarea{min-height:105px}.badge.bad{background:#f9e5e5;color:#9f3131}.badge.bad .dot{background:#b84141}
 @media(max-width:760px){.task-actions{grid-column:2;justify-content:flex-start;flex-wrap:wrap}.review-summary{grid-template-columns:1fr 1fr}}
+
+/* V0.6 Korrektur: Textfeld im Prüfdialog */
+.review-note{display:grid;gap:6px;width:100%;margin-top:14px}
+.review-note textarea{display:block;width:100%;min-height:105px;resize:vertical;border:1px solid #cfd9e3;border-radius:9px;padding:10px 11px;background:#fff;color:var(--text)}
+.review-note .field-hint{display:block;width:100%}
