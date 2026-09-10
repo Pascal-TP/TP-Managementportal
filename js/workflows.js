@@ -1,96 +1,14 @@
-const KEY = "tpManagementPortal.workflows.v03";
-
-function readRows() {
-  try {
-    const rows = JSON.parse(localStorage.getItem(KEY) || "[]");
-    return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeRows(rows) {
-  localStorage.setItem(KEY, JSON.stringify(rows));
-}
-
-function matchesUser(task, profile, side = "assignee") {
-  const uid = String(profile?.id || profile?.uid || "").trim();
-  const name = String(profile?.name || "").trim().toLowerCase();
-  const email = String(profile?.email || "").trim().toLowerCase();
-  if (side === "assignee") {
-    if (task.assigneeId && uid) return task.assigneeId === uid;
-    const a = String(task.assignee || "").trim().toLowerCase();
-    const ae = String(task.assigneeEmail || "").trim().toLowerCase();
-    return Boolean((a && (a === name || a === email)) || (ae && ae === email));
-  }
-  if (task.createdById && uid) return task.createdById === uid;
-  const cb = String(task.createdBy || "").trim().toLowerCase();
-  return Boolean(cb && (cb === name || cb === email));
-}
-
-export function createWorkflowTask(document, assignee, createdBy = "", createdById = "", kind = "review") {
-  const rows = readRows();
-  const now = new Date().toISOString();
-  const task = {
-    id: `WF-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    kind,
-    documentId: document.id,
-    documentTitle: document.title,
-    documentType: document.type,
-    assignee: String(assignee?.name || assignee?.email || "").trim(),
-    assigneeEmail: String(assignee?.email || "").trim(),
-    assigneeId: String(assignee?.id || "").trim(),
-    createdBy,
-    createdById: String(createdById || "").trim(),
-    status: "Offen",
-    decisionNote: "",
-    createdAt: now,
-    updatedAt: now,
-  };
-  rows.push(task);
-  writeRows(rows);
-  return task;
-}
-
-export function createQmWorkflowTask(document, qmUser, createdBy = "", createdById = "") {
-  return createWorkflowTask(document, qmUser, createdBy, createdById, "qm");
-}
-
-export function getWorkflowTasks() {
-  return readRows().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-}
-
-export function getTasksForUser(profile) {
-  return getWorkflowTasks().filter((t) => t.status === "Offen" && matchesUser(t, profile, "assignee"));
-}
-
-export function getRejectedTasksForCreator(profile, documents = []) {
-  const rejectedDocIds = new Set(documents.filter(d => d.status === "Abgelehnt").map(d => d.id));
-  return getWorkflowTasks().filter((t) => t.status === "Abgelehnt" && rejectedDocIds.has(t.documentId) && matchesUser(t, profile, "creator"));
-}
-
-export function getWorkflowTasksVisibleToUser(profile) {
-  return getWorkflowTasks().filter((t) => matchesUser(t, profile, "assignee") || matchesUser(t, profile, "creator"));
-}
-
-export function decideWorkflowTask(id, decision, completedBy = "", note = "") {
-  const rows = readRows();
-  const task = rows.find((x) => x.id === id);
-  if (!task) return null;
-  task.status = decision === "reject" ? "Abgelehnt" : decision === "publish" ? "Veröffentlicht" : "Freigegeben";
-  task.completedBy = completedBy;
-  task.decisionNote = String(note || "").trim();
-  task.updatedAt = new Date().toISOString();
-  writeRows(rows);
-  return task;
-}
-
-export function renameWorkflowDocument(oldId, newId) {
-  const rows = readRows();
-  rows.forEach(t => { if (t.documentId === oldId) t.documentId = newId; });
-  writeRows(rows);
-}
-
-export function deleteWorkflowTasksForDocument(documentId) {
-  writeRows(readRows().filter(t => t.documentId !== documentId));
-}
+import { portalCall } from "./document-store.js";
+let cache=[];
+export async function initializeWorkflows(){const r=await portalCall("listManagementPortalWorkflows");cache=r.workflows||[];return getWorkflowTasks();}
+export async function refreshWorkflows(){return initializeWorkflows();}
+function matchesUser(t,p,side="assignee"){const uid=String(p?.id||p?.uid||"");const name=String(p?.name||"").trim().toLowerCase();const email=String(p?.email||"").trim().toLowerCase();if(side==="assignee"){if(t.assigneeId&&uid)return t.assigneeId===uid;const a=String(t.assignee||"").toLowerCase(),ae=String(t.assigneeEmail||"").toLowerCase();return Boolean((a&&(a===name||a===email))||(ae&&ae===email));}if(t.createdById&&uid)return t.createdById===uid;const cb=String(t.createdBy||"").toLowerCase();return Boolean(cb&&(cb===name||cb===email));}
+export async function createWorkflowTask(document,assignee,createdBy="",createdById="",kind="review"){const r=await portalCall("createManagementPortalWorkflow",{documentId:document.id,assignee,createdBy,createdById,kind});cache.push(r.workflow);return r.workflow;}
+export function createQmWorkflowTask(document,qmUser,createdBy="",createdById=""){return createWorkflowTask(document,qmUser,createdBy,createdById,"qm");}
+export function getWorkflowTasks(){return [...cache].sort((a,b)=>String(b.createdAt||"").localeCompare(String(a.createdAt||"")));}
+export function getTasksForUser(p){return getWorkflowTasks().filter(t=>t.status==="Offen"&&matchesUser(t,p));}
+export function getRejectedTasksForCreator(p,docs=[]){const ids=new Set(docs.filter(d=>d.status==="Abgelehnt").map(d=>d.id));return getWorkflowTasks().filter(t=>t.status==="Abgelehnt"&&ids.has(t.documentId)&&matchesUser(t,p,"creator"));}
+export function getWorkflowTasksVisibleToUser(p){return getWorkflowTasks().filter(t=>matchesUser(t,p)||matchesUser(t,p,"creator"));}
+export async function decideWorkflowTask(id,decision,completedBy="",note=""){const r=await portalCall("decideManagementPortalWorkflow",{workflowId:id,decision,completedBy,note});const i=cache.findIndex(t=>t.id===id);if(i>=0)cache[i]=r.workflow;return r.workflow;}
+export async function renameWorkflowDocument(oldId,newId){const r=await portalCall("renameManagementPortalWorkflowDocument",{oldId,newId});await initializeWorkflows();return r;}
+export async function deleteWorkflowTasksForDocument(documentId){const r=await portalCall("archiveManagementPortalWorkflowsForDocument",{documentId});cache=cache.filter(t=>t.documentId!==documentId);return r;}

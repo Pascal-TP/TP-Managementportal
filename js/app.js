@@ -36,7 +36,9 @@ import {
   archiveDocument,
   deleteDocument,
   downloadOriginalFile,
-  openPdfFile
+  openPdfFile,
+  initializeDocuments,
+  refreshDocuments
 } from "./documents.js";
 import {
   createWorkflowTask,
@@ -47,10 +49,14 @@ import {
   getRejectedTasksForCreator,
   decideWorkflowTask,
   renameWorkflowDocument,
-  deleteWorkflowTasksForDocument
+  deleteWorkflowTasksForDocument,
+  initializeWorkflows,
+  refreshWorkflows
 } from "./workflows.js";
 import { renderMyFilesModule } from "./my-files.js";
 import { renderPublicAreasModule } from "./public-areas.js";
+import { loadArchive, restoreArchiveItem, permanentlyDeleteArchiveItem, getArchiveFileUrl } from "./archive.js";
+import { loadHistory } from "./history.js";
 
 const companies = [
   "Alle Unternehmen",
@@ -75,7 +81,8 @@ const fullNav = [
   ["myfiles", "▱", "Meine Dateien"],
   ["shared", "♧", "Für mich freigegeben"],
   ["companies", "⌂", "Unternehmen"],
-  ["archive", "▱", "Archiv / Historie"],
+  ["archive", "▱", "Archiv"],
+  ["history", "◴", "Historie"],
 ];
 const employeeNav = [
   ["dashboard", "▦", "Dashboard"],
@@ -90,6 +97,7 @@ const employeeEditorNav = [
   ["areas", "▣", "Öffentliche Bereiche"],
   ["myfiles", "▱", "Meine Dateien"],
   ["shared", "♧", "Für mich freigegeben"],
+  ["archive", "▱", "Archiv"],
 ];
 
 let current = "dashboard";
@@ -196,7 +204,8 @@ function emptyState(titleText, text, button = "") {
   return `<div class="empty-state"><div class="empty-icon">▤</div><strong>${esc(titleText)}</strong><p>${esc(text)}</p>${button}</div>`;
 }
 function initNav() {
-  const nav = portalView === "employee" ? employeeNav : portalView === "employee-editor" ? employeeEditorNav : fullNav;
+  let nav = portalView === "employee" ? employeeNav : portalView === "employee-editor" ? employeeEditorNav : fullNav;
+  if (currentProfile?.role !== "admin") nav = nav.filter(x => x[0] !== "history");
   document.querySelector("#main-nav").innerHTML = nav.map(([id, ic, l]) => `<button class="nav-btn ${id === current ? "active" : ""}" data-page="${id}"><span class="icon">${ic}</span>${l}</button>`).join("");
   document.querySelectorAll("#main-nav [data-page]").forEach(b => b.onclick = () => render(b.dataset.page));
 }
@@ -211,8 +220,8 @@ function render(page) {
   const views = portalView === "employee"
     ? { dashboard: renderEmployeeDashboard, documents: renderEmployeeDocuments, areas: renderAreas, myfiles: renderMyFiles, shared: renderShared }
     : portalView === "employee-editor"
-      ? { dashboard: renderDashboard, documents: renderDocuments, workflow: renderWorkflow, areas: renderAreas, myfiles: renderMyFiles, shared: renderShared }
-      : { dashboard: renderDashboard, documents: renderDocuments, workflow: renderWorkflow, deadlines: renderDeadlines, areas: renderAreas, companies: renderCompanies, archive: renderArchive, myfiles: renderMyFiles, shared: renderShared, settings: renderSettings };
+      ? { dashboard: renderDashboard, documents: renderDocuments, workflow: renderWorkflow, areas: renderAreas, myfiles: renderMyFiles, shared: renderShared, archive: renderArchive }
+      : { dashboard: renderDashboard, documents: renderDocuments, workflow: renderWorkflow, deadlines: renderDeadlines, areas: renderAreas, companies: renderCompanies, archive: renderArchive, history: renderHistory, myfiles: renderMyFiles, shared: renderShared, settings: renderSettings };
   (views[page] || views.dashboard)();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -340,11 +349,34 @@ function renderCompanies() {
   const docs = getVisibleDocumentsForUser({ ...currentProfile, uid: currentUser?.uid }).filter(d => !d.archived);
   content.innerHTML = `<div class="card"><div class="card-head"><div><h2>Unternehmensverbund</h2><p>Ein Dokument kann einer Firma oder allen Unternehmen zugeordnet werden.</p></div></div><div class="company-grid">${companies.slice(1).map(c => { const m = companyMeta[c]; const n = docs.filter(d => d.company === c || d.company === "Alle Unternehmen").length; return `<div class="company-card" onclick="render('documents')"><div class="company-logo-wrap"><img src="${m.logo}" alt="${esc(c)} Logo"></div><div class="company-card-copy"><strong>${esc(c)}</strong><span>${n} zugeordnete Dokumente</span></div><div class="company-card-arrow">›</div></div>`; }).join("")}</div></div>`;
 }
-function renderArchive() {
-  setHead("Archiv / Historie", "Zurückgezogene Dokumente nachvollziehbar aufbewahren.");
-  const archived = getDocuments().filter(d => d.archived);
-  content.innerHTML = `<div class="info-strip">Dokumente werden nicht physisch gelöscht, sondern durch Administratoren archiviert. So bleibt die Historie erhalten.</div><div class="card"><div class="card-head"><div><h2>Archivierte Dokumente</h2><p>Zurückgezogene und nicht mehr gültige Inhalte.</p></div></div>${archived.length ? docTable(archived) : emptyState("Archiv ist leer", "Aktuell wurden noch keine Dokumente archiviert.")}</div>`;
+async function renderArchive() {
+  setHead("Archiv", "Persönlicher Papierkorb und dauerhaft aufbewahrte Dokumentversionen.");
+  content.innerHTML = `<div class="card">${emptyState("Archiv wird geladen", "Die archivierten Inhalte werden zentral abgerufen.")}</div>`;
+  try {
+    const items = await loadArchive();
+    const rows = items.map(a => {
+      const when = fmtDateTime(a.archivedAt);
+      const scope = a.scope === "qm" ? "QM-Archiv" : a.scope === "admin" ? "Admin-Archiv" : "Mein Archiv";
+      const locked = a.retentionLocked === true;
+      const open = (a.storagePath || a.pdfStoragePath || a.sourceStoragePath) ? `<button class="btn secondary small" onclick="openArchiveItem('${a.id}')">Öffnen</button>` : "";
+      const restore = a.restorable === false ? "" : `<button class="btn secondary small" onclick="restoreArchive('${a.id}')">Wiederherstellen</button>`;
+      const del = locked ? `<span class="badge gray">Dauerhaft aufzubewahren</span>` : `<button class="btn danger small" onclick="deleteArchiveForever('${a.id}')">Endgültig löschen</button>`;
+      return `<div class="archive-row"><div class="archive-icon">▱</div><div class="archive-copy"><strong>${esc(a.label || "Archiviertes Element")}</strong><span>${esc(scope)} · ${esc(a.kind || "Element")} · ${when}${a.archivedByName ? ` · entfernt von ${esc(a.archivedByName)}` : ""}</span>${a.description ? `<small>${esc(a.description)}</small>` : ""}</div><div class="archive-actions">${open}${restore}${del}</div></div>`;
+    }).join("");
+    content.innerHTML = `<div class="info-strip"><strong>Archivprinzip:</strong> Persönliche Löschungen bleiben personenbezogen. Inhalte aus „Öffentliche Bereiche“ stehen allen Admins im Admin-Archiv zur Verfügung. QM-gelenkte Dokumente und deren alte Versionen können niemals endgültig gelöscht werden.</div><div class="card"><div class="card-head"><div><h2>Archivierte Inhalte</h2><p>Gelöschte Elemente und frühere Dokumentstände.</p></div></div>${rows ? `<div class="archive-list">${rows}</div>` : emptyState("Archiv ist leer", "Aktuell befinden sich keine Inhalte in Ihrem Archiv.")}</div>`;
+  } catch (err) { content.innerHTML = `<div class="card">${emptyState("Archiv konnte nicht geladen werden", err.message || "Bitte später erneut versuchen.")}</div>`; }
 }
+async function renderHistory() {
+  if (currentProfile?.role !== "admin") return render("dashboard");
+  setHead("Historie", "Zentrales, unveränderbares Aktivitätsprotokoll des Managementportals.");
+  content.innerHTML = `<div class="card">${emptyState("Historie wird geladen", "Aktivitäten werden zentral abgerufen.")}</div>`;
+  try {
+    const entries = await loadHistory(500);
+    const rows = entries.map(h => `<tr><td>${fmtDateTime(h.at)}</td><td><strong>${esc(h.actorName || "System")}</strong><small>${esc(h.actorEmail || "")}</small></td><td>${esc(h.area || "–")}</td><td>${esc(h.action || "–")}</td><td><strong>${esc(h.label || h.itemId || "–")}</strong><small>${esc(h.kind || "")}</small></td></tr>`).join("");
+    content.innerHTML = `<div class="info-strip"><strong>Nur für Admins:</strong> Die Historie protokolliert zentrale Aktionen und kann über die Portaloberfläche weder verändert noch gelöscht werden.</div><div class="card"><div class="card-head"><div><h2>Aktivitätsprotokoll</h2><p>Die letzten ${entries.length} protokollierten Vorgänge.</p></div></div>${rows ? `<div class="table-wrap"><table class="data-table history-table"><thead><tr><th>Zeitpunkt</th><th>Nutzer</th><th>Bereich</th><th>Aktion</th><th>Element</th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyState("Noch keine Historie", "Neue Aktionen werden ab V2.0 automatisch protokolliert.")}</div>`;
+  } catch(err) { content.innerHTML = `<div class="card">${emptyState("Historie konnte nicht geladen werden", err.message || "Bitte später erneut versuchen.")}</div>`; }
+}
+
 function renderSettings() {
   setHead("Systemeinstellungen", "Dokumentarten und Workflow-Grundregeln.");
   content.innerHTML = `<div class="three-col"><div class="card"><h2>Pflicht-Workflow</h2><p class="muted"><strong>Arbeitsanweisung</strong><br><strong>Verfahrensanweisung</strong><br><strong>Betriebsanweisung</strong><br><strong>Formular / Vorlage</strong><br><strong>Monatsbericht</strong><br><br>Diese Dokumentarten können nicht ohne Freigabeworkflow veröffentlicht werden.</p></div><div class="card"><h2>Optionaler Workflow</h2><p class="muted">Bei allen anderen Dokumentarten kann beim Hochladen freiwillig ein Kollege für Prüfung/Freigabe ausgewählt werden.</p></div><div class="card"><h2>QM-Endfreigabe</h2><p class="muted">Gelenkte Dokumente werden nach der fachlichen Prüfung automatisch an den Benutzer <strong>QM</strong> weitergeleitet. Nur QM vergibt die endgültige Dokumentnummer und Version und veröffentlicht.</p></div></div>`;
@@ -356,14 +388,13 @@ async function openDoc(id) {
   const actor = { ...currentProfile, uid: currentUser?.uid };
   if (!canViewDocument(d, actor)) return toast("Dieses Dokument ist für Sie noch nicht veröffentlicht.");
   const creator = isDocumentCreator(d, actor);
-  const history = (d.history || []).map(h => `<div class="timeline-item"><strong>${esc(h.action)}</strong><span>${esc(h.by || "System")} · ${fmtDateTime(h.at)}</span></div>`).join("");
-  const adminArchive = currentProfile?.role === "admin" && d.status === "Freigegeben" && !d.archived ? `<button class="btn secondary" onclick="archiveCurrentDoc('${d.id}')">Archivieren</button>` : "";
+  const adminArchive = "";
   const adminDelete = currentProfile?.role === "admin" && !d.archived ? `<button class="btn danger" onclick="deleteCurrentDoc('${d.id}')">Löschen</button>` : "";
   const editMeta = portalView !== "employee" && !d.archived && (creator || currentProfile?.role === "admin") ? `<button class="btn secondary" onclick="openEditDoc('${d.id}')">Dokumentdaten bearbeiten</button>` : "";
   const revise = creator && !d.archived && d.status !== "In Prüfung" ? `<button class="btn secondary" onclick="openRevisionDoc('${d.id}')">Dokument überarbeiten</button>` : "";
   const sourceButton = creator && canAccessOriginal(d, actor) ? `<button class="btn secondary" onclick="editCurrentDoc('${d.id}')">Dokument bearbeiten</button>` : "";
   const pdfButton = canAccessPdf(d, actor) ? `<button class="btn" onclick="openPdfCurrentDoc('${d.id}')">Dokument öffnen</button>` : "";
-  modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>${esc(displayDocNo(d))}${displayDocNo(d) !== "–" ? " · " : ""}${esc(d.title)}</h2><p>${esc(d.type)} · Version ${esc(d.version)}</p></div><button class="close-btn" onclick="closeModal()">×</button></div><div class="detail-grid"><div class="detail-item"><span>Dokumentnummer</span><strong>${esc(displayDocNo(d))}</strong></div><div class="detail-item"><span>Erstellt von</span><strong>${esc(d.createdBy || "–")}</strong></div><div class="detail-item"><span>Erstellt am</span><strong>${fmtDateTime(d.createdAt)}</strong></div><div class="detail-item"><span>Unternehmen</span><strong>${esc(d.company)}</strong></div><div class="detail-item"><span>Bereich</span><strong>${esc(d.area)}</strong></div><div class="detail-item"><span>Status</span><strong>${esc(d.status)}</strong></div><div class="detail-item"><span>Originaldatei</span><strong>${creator ? `${esc(d.fileName)} · ${humanSize(d.fileSize)}` : "Nur für den Ersteller sichtbar"}</strong></div><div class="detail-item"><span>PDF-Lesefassung</span><strong>${esc(d.pdfFileName || (d.fileType === "application/pdf" ? d.fileName : "PDF-Lesefassung"))}</strong></div><div class="detail-item"><span>Nächste Prüfung</span><strong>${fmtDate(d.review)}</strong></div><div class="detail-item"><span>Workflow</span><strong>${d.workflowEnabled ? `Ja · ${esc(d.workflowAssignee)}` : "Nein"}</strong></div><div class="detail-item"><span>Sichtbarkeit</span><strong>${esc(visibilitySummary(d))}</strong></div></div><div class="info-strip"><strong>Zugriffsregel:</strong> „Dokument öffnen“ zeigt die PDF-Lesefassung. Nur der Ersteller erhält über „Dokument bearbeiten“ die hochgeladene Originaldatei zur Bearbeitung.</div>${d.note ? `<p style="font-size:12px;line-height:1.55">${esc(d.note)}</p>` : ""}<h3 style="font-size:13px">Historie</h3><div class="timeline">${history || '<div class="timeline-item"><strong>Noch keine Historie</strong></div>'}</div><div class="modal-footer">${adminDelete}${adminArchive}${editMeta}${revise}${sourceButton}${pdfButton}</div></div>`;
+  modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>${esc(displayDocNo(d))}${displayDocNo(d) !== "–" ? " · " : ""}${esc(d.title)}</h2><p>${esc(d.type)} · Version ${esc(d.version)}</p></div><button class="close-btn" onclick="closeModal()">×</button></div><div class="detail-grid"><div class="detail-item"><span>Dokumentnummer</span><strong>${esc(displayDocNo(d))}</strong></div><div class="detail-item"><span>Erstellt von</span><strong>${esc(d.createdBy || "–")}</strong></div><div class="detail-item"><span>Erstellt am</span><strong>${fmtDateTime(d.createdAt)}</strong></div><div class="detail-item"><span>Unternehmen</span><strong>${esc(d.company)}</strong></div><div class="detail-item"><span>Bereich</span><strong>${esc(d.area)}</strong></div><div class="detail-item"><span>Status</span><strong>${esc(d.status)}</strong></div><div class="detail-item"><span>Originaldatei</span><strong>${creator ? `${esc(d.fileName)} · ${humanSize(d.fileSize)}` : "Nur für den Ersteller sichtbar"}</strong></div><div class="detail-item"><span>PDF-Lesefassung</span><strong>${esc(d.pdfFileName || (d.fileType === "application/pdf" ? d.fileName : "PDF-Lesefassung"))}</strong></div><div class="detail-item"><span>Nächste Prüfung</span><strong>${fmtDate(d.review)}</strong></div><div class="detail-item"><span>Workflow</span><strong>${d.workflowEnabled ? `Ja · ${esc(d.workflowAssignee)}` : "Nein"}</strong></div><div class="detail-item"><span>Sichtbarkeit</span><strong>${esc(visibilitySummary(d))}</strong></div></div><div class="info-strip"><strong>Zugriffsregel:</strong> „Dokument öffnen“ zeigt die PDF-Lesefassung. Nur der Ersteller erhält über „Dokument bearbeiten“ die hochgeladene Originaldatei zur Bearbeitung.</div>${d.note ? `<p style="font-size:12px;line-height:1.55">${esc(d.note)}</p>` : ""}${currentProfile?.role === "admin" ? `<div class="info-strip"><strong>Zentrale Historie:</strong> Alle Änderungen werden im separaten Menüpunkt „Historie“ protokolliert.</div>` : ""}<div class="modal-footer">${adminDelete}${adminArchive}${editMeta}${revise}${sourceButton}${pdfButton}</div></div>`;
   modal.showModal();
 }
 
@@ -472,10 +503,10 @@ async function submitNewDocument(e) {
       visibilityUsers: visibility.users,
     }, pendingUploadFile, pendingPdfFile);
     if (workflowEnabled) {
-      createWorkflowTask(doc, assignee, currentProfile.name || currentProfile.email || "", currentUser?.uid || "");
+      await createWorkflowTask(doc, assignee, currentProfile.name || currentProfile.email || "", currentUser?.uid || "");
     } else if (numberRequired) {
-      const qmDoc = sendDocumentToQm(doc.id, qmUser, currentProfile.name || currentProfile.email || "");
-      createQmWorkflowTask(qmDoc, qmUser, currentProfile.name || currentProfile.email || "", currentUser?.uid || "");
+      const qmDoc = await sendDocumentToQm(doc.id, qmUser, currentProfile.name || currentProfile.email || "");
+      await createQmWorkflowTask(qmDoc, qmUser, currentProfile.name || currentProfile.email || "", currentUser?.uid || "");
     }
     closeModal();
     toast(workflowEnabled ? "Dokument hochgeladen und Workflow gestartet." : numberRequired ? "Dokument hochgeladen und an QM weitergeleitet." : "Dokument hochgeladen und direkt veröffentlicht.");
@@ -511,13 +542,12 @@ function openEditDoc(id) {
         if (entered !== oldId) {
           newId = entered;
           await renameDocumentNumber(oldId, newId, currentProfile.name || currentProfile.email || "");
-          renameWorkflowDocument(oldId, newId);
-          markDocumentNumberAssigned(newId, currentProfile.name || currentProfile.email || "");
+          await renameWorkflowDocument(oldId, newId);
         }
       }
       const patch = { title: document.querySelector("#edit-title").value, company: document.querySelector("#edit-company").value, area: document.querySelector("#edit-area").value, review: document.querySelector("#edit-review").value || "–", note: document.querySelector("#edit-note").value, visibilityMode: visibility.mode, visibilityUserIds: visibility.ids, visibilityUsers: visibility.users };
       if (!controlled) patch.version = document.querySelector("#edit-version").value || "1.0";
-      updateDocumentMetadata(newId, patch, currentProfile.name || currentProfile.email || "");
+      await updateDocumentMetadata(newId, patch, currentProfile.name || currentProfile.email || "");
       closeModal(); toast("Dokumentdaten gespeichert."); render("documents");
     } catch (err) { toast(err.message || "Dokumentdaten konnten nicht gespeichert werden."); }
   };
@@ -537,21 +567,21 @@ async function finishReview(taskId, docId, decision) {
   const note = document.querySelector("#review-note")?.value.trim() || "";
   if (decision === "reject" && !note) return toast("Bitte bei einer Ablehnung zwingend einen Grund angeben.");
   const by = currentProfile.name || currentProfile.email || "";
-  decideWorkflowTask(taskId, decision, by, note);
+  await decideWorkflowTask(taskId, decision, by, note);
   const d = getDocument(docId);
   if (!d) return toast("Dokument wurde nicht gefunden.");
   if (decision === "reject") {
-    updateDocumentStatus(docId, "Abgelehnt", by, note);
+    await updateDocumentStatus(docId, "Abgelehnt", by, note);
     closeModal();
     toast("Dokument wurde mit Begründung zur Überarbeitung zurückgegeben.");
   } else if (MANDATORY_WORKFLOW_TYPES.has(d.type) || d.numberRequired) {
     if (!qmUser) return toast("QM-Benutzer wurde nicht gefunden. Bitte den QM-Zugang prüfen.");
-    const updated = sendDocumentToQm(docId, qmUser, by, note);
-    createQmWorkflowTask(updated, qmUser, updated.createdBy || by, updated.createdById || currentUser?.uid || "");
+    const updated = await sendDocumentToQm(docId, qmUser, by, note);
+    await createQmWorkflowTask(updated, qmUser, updated.createdBy || by, updated.createdById || currentUser?.uid || "");
     closeModal();
     toast("Fachlich freigegeben. Das Dokument wurde an QM zur Dokumentnummern- und Versionsvergabe weitergeleitet.");
   } else {
-    updateDocumentStatus(docId, "Freigegeben", by, note);
+    await updateDocumentStatus(docId, "Freigegeben", by, note);
     closeModal();
     toast("Dokument wurde freigegeben und veröffentlicht.");
   }
@@ -578,8 +608,8 @@ async function finishQmTask(taskId, docId, decision) {
   const by = currentProfile.name || currentProfile.email || "QM";
   if (decision === "reject") {
     if (!note) return toast("Bitte bei einer Ablehnung zwingend einen Grund angeben.");
-    decideWorkflowTask(taskId, "reject", by, note);
-    updateDocumentStatus(docId, "Abgelehnt", by, note);
+    await decideWorkflowTask(taskId, "reject", by, note);
+    await updateDocumentStatus(docId, "Abgelehnt", by, note);
     closeModal();
     toast("Dokument wurde vom QM mit Begründung an den Ersteller zurückgegeben.");
     return render(current === "dashboard" ? "dashboard" : "workflow");
@@ -592,13 +622,13 @@ async function finishQmTask(taskId, docId, decision) {
     let finalId = docId;
     if (number !== docId) {
       await renameDocumentNumber(docId, number, by);
-      renameWorkflowDocument(docId, number);
+      await renameWorkflowDocument(docId, number);
       finalId = number;
     }
-    markDocumentNumberAssigned(finalId, by);
-    setDocumentVersionByQm(finalId, version, by);
-    updateDocumentStatus(finalId, "Freigegeben", by, note);
-    decideWorkflowTask(taskId, "publish", by, note);
+    await markDocumentNumberAssigned(finalId, by);
+    await setDocumentVersionByQm(finalId, version, by);
+    await updateDocumentStatus(finalId, "Freigegeben", by, note);
+    await decideWorkflowTask(taskId, "publish", by, note);
     closeModal();
     toast("Dokumentnummer und Version durch QM freigegeben. Das Dokument wurde veröffentlicht.");
     render(current === "dashboard" ? "dashboard" : "workflow");
@@ -640,25 +670,25 @@ function openRevisionDoc(id) {
     if(workflowEnabled && !assignee)return toast("Bitte einen Kollegen für die erneute Prüfung auswählen.");
     try {
       const updated=await replaceDocumentFiles(id,pendingUploadFile,pendingPdfFile,{version:controlled ? d.version : (document.querySelector("#revision-version").value||d.version),note:document.querySelector("#revision-note").value,workflowEnabled,workflowAssignee:workflowEnabled ? (assignee?.name||assignee?.email||"") : "",workflowAssigneeId:workflowEnabled ? (assignee?.id||"") : ""},currentProfile.name||currentProfile.email||"");
-      if(workflowEnabled) createWorkflowTask(updated,assignee,currentProfile.name||currentProfile.email||"",currentUser?.uid||"");
-      else if(controlled || d.numberRequired) { if(!qmUser) return toast("QM-Benutzer wurde nicht gefunden."); const qmDoc=sendDocumentToQm(updated.id,qmUser,currentProfile.name||currentProfile.email||""); createQmWorkflowTask(qmDoc,qmUser,currentProfile.name||currentProfile.email||"",currentUser?.uid||""); }
+      if(workflowEnabled) await createWorkflowTask(updated,assignee,currentProfile.name||currentProfile.email||"",currentUser?.uid||"");
+      else if(controlled || d.numberRequired) { if(!qmUser) return toast("QM-Benutzer wurde nicht gefunden."); const qmDoc=await sendDocumentToQm(updated.id,qmUser,currentProfile.name||currentProfile.email||""); await createQmWorkflowTask(qmDoc,qmUser,currentProfile.name||currentProfile.email||"",currentUser?.uid||""); }
       closeModal(); toast(workflowEnabled ? "Überarbeitete Dokumente hochgeladen. Der Workflow wurde neu gestartet." : (controlled || d.numberRequired) ? "Überarbeitete Dokumente hochgeladen und erneut an QM weitergeleitet." : "Überarbeitete Dokumente hochgeladen und veröffentlicht."); render("dashboard");
     } catch(err){toast(err.message||"Dokument konnte nicht neu eingereicht werden.");}
   };
 }
 
-function archiveCurrentDoc(id) {
-  archiveDocument(id, currentProfile.name || currentProfile.email || "");
-  closeModal(); toast("Dokument wurde archiviert."); render("documents");
+async function archiveCurrentDoc(id) {
+  try { await archiveDocument(id, currentProfile.name || currentProfile.email || ""); await refreshWorkflows(); closeModal(); toast("Dokument wurde ins Archiv verschoben."); render("documents"); }
+  catch(err){ toast(err.message || "Dokument konnte nicht archiviert werden."); }
 }
 
 async function deleteCurrentDoc(id) {
   if (currentProfile?.role !== "admin") return toast("Nur ein Admin darf Dokumente löschen.");
-  if (!confirm(`Dokument ${id} wirklich endgültig löschen? Die gespeicherten Dateien und zugehörigen Workflow-Aufgaben werden ebenfalls entfernt.`)) return;
+  if (!confirm(`Dokument ${id} in das persönliche bzw. QM-Archiv verschieben?`)) return;
   try {
     await deleteDocument(id);
-    deleteWorkflowTasksForDocument(id);
-    closeModal(); toast("Dokument wurde gelöscht."); render("documents");
+    await refreshWorkflows();
+    closeModal(); toast("Dokument wurde ins Archiv verschoben."); render("documents");
   } catch (err) { toast(err.message || "Dokument konnte nicht gelöscht werden."); }
 }
 
@@ -673,6 +703,9 @@ async function openPdfCurrentDoc(id) {
   if (!canAccessPdf(d, { ...currentProfile, uid: currentUser?.uid })) return toast("Die PDF-Lesefassung ist für Sie nicht freigegeben.");
   try { await openPdfFile(id); } catch (e) { toast(e.message); }
 }
+async function restoreArchive(id){ if(!confirm("Dieses Element wirklich wiederherstellen?"))return; try{await restoreArchiveItem(id);await Promise.all([refreshDocuments(),refreshWorkflows()]);toast("Element wurde wiederhergestellt.");render("archive");}catch(err){toast(err.message||"Wiederherstellung nicht möglich.");}}
+async function deleteArchiveForever(id){if(!confirm("Dieses Element wirklich endgültig löschen? Dieser Vorgang kann nicht rückgängig gemacht werden."))return;try{await permanentlyDeleteArchiveItem(id);toast("Element wurde endgültig gelöscht.");render("archive");}catch(err){toast(err.message||"Endgültiges Löschen nicht möglich.");}}
+async function openArchiveItem(id){try{const r=await getArchiveFileUrl(id,"inline");window.open(r.url,"_blank","noopener");}catch(err){toast(err.message||"Archivdatei konnte nicht geöffnet werden.");}}
 function closeModal() { if (modal.open) modal.close(); }
 function toast(msg) { const t = document.querySelector("#toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2800); }
 
@@ -688,16 +721,17 @@ async function applyProfile(profile, user) {
   if (settingsBtn) settingsBtn.style.display = profile.role === "admin" ? "" : "none";
   colleagues = await loadAssignableColleagues();
   qmUser = await loadQmUser();
+  await Promise.all([initializeDocuments(), initializeWorkflows()]);
   current = "dashboard";
   render("dashboard");
 }
 function showLogin(message = "") { currentProfile = null; currentUser = null; document.querySelector("#app-shell").classList.add("hidden"); document.querySelector("#login-page").classList.remove("hidden"); document.querySelector("#login-message").textContent = message; }
 async function showPortal(profile, user) { document.querySelector("#login-message").textContent = ""; document.querySelector("#login-page").classList.add("hidden"); document.querySelector("#app-shell").classList.remove("hidden"); await applyProfile(profile, user); }
 
-Object.assign(window, { render, openDoc, openNewDoc, openEditDoc, openReviewTask, finishReview, openQmTask, finishQmTask, openRevisionDoc, closeModal, toast, archiveCurrentDoc, deleteCurrentDoc, editCurrentDoc, openPdfCurrentDoc });
+Object.assign(window, { render, openDoc, openNewDoc, openEditDoc, openReviewTask, finishReview, openQmTask, finishQmTask, openRevisionDoc, closeModal, toast, archiveCurrentDoc, deleteCurrentDoc, editCurrentDoc, openPdfCurrentDoc, restoreArchive, deleteArchiveForever, openArchiveItem });
 document.querySelector("#settings-link").onclick = () => render("settings");
 document.querySelector("#logout-btn").onclick = () => logout();
-document.querySelector("#portal-info").onclick = () => { modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal</h2><p>Version 1.0</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Zentrale Plattform für Unternehmensdokumente, Freigabeworkflows, öffentliche Informationen, persönliche Dateien und freigegebene Arbeitsbereiche.</p><p style="font-size:12px;line-height:1.65"><strong>V1.0:</strong> Der Bereich „Öffentliche Bereiche“ ist nun ein vollständiger gemeinsamer Datei- und Informationsbereich. Alle Portalnutzer können Inhalte lesen; ausschließlich Admins können Ordner, Unterordner, Dateien und Web-Links verwalten.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Schließen</button></div></div>`; modal.showModal(); };
+document.querySelector("#portal-info").onclick = () => { modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal</h2><p>Version 2.0</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Zentrale Plattform für Unternehmensdokumente, Freigabeworkflows, öffentliche Informationen, persönliche Dateien und freigegebene Arbeitsbereiche.</p><p style="font-size:12px;line-height:1.65"><strong>V2.0:</strong> Dokumentenregister und Workflows arbeiten nun vollständig zentral. Zusätzlich stehen ein personenbezogenes Archiv sowie eine zentrale, nur für Admins sichtbare Historie zur Verfügung. Frühere QM-Dokumentstände bleiben dauerhaft erhalten.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Schließen</button></div></div>`; modal.showModal(); };
 document.querySelector("#personalmanagement-link").onclick = () => { const url = localStorage.getItem("tpPersonalmanagementUrl") || ""; if (url) window.open(url, "_blank", "noopener"); else toast("Die produktive URL des TP-Personalmanagements wird hier noch hinterlegt."); };
 document.querySelector("#login-form").addEventListener("submit", async e => { e.preventDefault(); const msg = document.querySelector("#login-message"); msg.textContent = "Anmeldung läuft …"; try { await login(document.querySelector("#login-identifier").value, document.querySelector("#login-password").value); } catch (err) { console.error(err); msg.textContent = "Anmeldung nicht möglich. Bitte Zugangsdaten prüfen."; } });
 document.querySelector("#forgot-password-btn").onclick = async () => { try { await requestPasswordReset(document.querySelector("#login-identifier").value); toast("Passwort-Link wurde angefordert."); } catch (err) { toast(err.message || "Passwort-Link konnte nicht angefordert werden."); } };
