@@ -1,12 +1,11 @@
 import { portalCall, uploadPayload } from "./document-store.js";
 
-export const DOCUMENT_TYPES = [
-  "Arbeitsanweisung", "Verfahrensanweisung", "Betriebsanweisung", "Formular / Vorlage", "Monatsbericht",
-  "Sicherheitsdatenblatt", "Richtlinie", "Zertifikat", "Bescheinigung / Nachweis", "Vertrag", "Sonstiges Dokument"
-];
-export const MANDATORY_WORKFLOW_TYPES = new Set(["Arbeitsanweisung", "Verfahrensanweisung", "Betriebsanweisung", "Formular / Vorlage", "Monatsbericht"]);
-export const QM_CONTROLLED_TYPES = MANDATORY_WORKFLOW_TYPES;
-const PREFIX = {"Arbeitsanweisung":"AA","Verfahrensanweisung":"VA","Betriebsanweisung":"BA","Formular / Vorlage":"FO","Monatsbericht":"MB"};
+export let DOCUMENT_TYPES = ["Arbeitsanweisung","Verfahrensanweisung","Betriebsanweisung","Formular / Vorlage","Monatsbericht","Sicherheitsdatenblatt","Richtlinie","Zertifikat","Bescheinigung / Nachweis","Vertrag","Sonstiges Dokument"];
+export let MANDATORY_WORKFLOW_TYPES = new Set(["Arbeitsanweisung","Verfahrensanweisung","Betriebsanweisung","Formular / Vorlage","Monatsbericht"]);
+export let QM_CONTROLLED_TYPES = MANDATORY_WORKFLOW_TYPES;
+let PREFIX = {"Arbeitsanweisung":"AA","Verfahrensanweisung":"VA","Betriebsanweisung":"BA","Formular / Vorlage":"FO","Monatsbericht":"MB"};
+let NEXT_NUMBER = {};
+export function applyDocumentSettings(settings={}){ const rows=(settings.documentTypes||[]).filter(x=>x.active!==false); if(rows.length){ DOCUMENT_TYPES=rows.map(x=>x.name); MANDATORY_WORKFLOW_TYPES=new Set(rows.filter(x=>x.workflow===true).map(x=>x.name)); QM_CONTROLLED_TYPES=new Set(rows.filter(x=>x.qmNumber===true||x.qmVersion===true||x.retentionLocked===true).map(x=>x.name)); PREFIX=Object.fromEntries(rows.map(x=>[x.name,String(x.prefix||'DOK').toUpperCase()])); NEXT_NUMBER=Object.fromEntries(rows.map(x=>[x.name,Math.max(1,Number(x.nextNumber||1))])); } }
 let cache = [];
 
 function cleanDoc(d = {}) { return { ...d, id: String(d.id || "") }; }
@@ -27,7 +26,7 @@ export function canAccessOriginal(d,user={}) { return isDocumentCreator(d,user);
 export function canAccessPdf(d,user={}) { return canViewDocument(d,user); }
 export function getVisibleDocumentsForUser(user={}) { return getDocuments().filter(d=>canViewDocument(d,user)); }
 export function getVisibleDocumentsForEmployee(user={}) { return getDocuments().filter(d=>d.status==="Freigegeben"&&canViewDocument(d,user)); }
-export function generateDocumentNumber(type) { const p=PREFIX[type]||"DOK"; const max=cache.filter(d=>String(d.id||"").startsWith(p+".")).reduce((m,d)=>{const n=Number(String(d.id).split(".")[1]);return Number.isFinite(n)?Math.max(m,n):m;},0); return `${p}.${String(max+1).padStart(3,"0")}.01`; }
+export function generateDocumentNumber(type) { const p=PREFIX[type]||"DOK"; const max=cache.filter(d=>String(d.id||"").startsWith(p+".")).reduce((m,d)=>{const n=Number(String(d.id).split(".")[1]);return Number.isFinite(n)?Math.max(m,n):m;},0); const next=Math.max(max+1,Number(NEXT_NUMBER[type]||1)); return `${p}.${String(next).padStart(3,"0")}.01`; }
 export function generateNextVersion(v="") { const m=String(v||"").trim().match(/^(\d+)(?:\.(\d+))?$/); if(!m)return !v||v==="–"?"1.0":v; return `${Number(m[1])}.${Number(m[2]||0)+1}`; }
 export function generateTemporaryDocumentId(){return `ENTW-${Date.now()}-${Math.random().toString(36).slice(2,7)}`;}
 export function getDisplayDocumentNumber(d){if(!d)return"–";return d.numberAssigned===false||String(d.id||"").startsWith("ENTW-")?"–":d.id||"–";}

@@ -1,3 +1,4 @@
+import { getPortalSettings } from "./settings.js";
 import { auth, cloudFunctions } from "./firebase.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
 
@@ -90,7 +91,7 @@ export async function renderPublicAreasModule(ctx) {
 
       ${isAdmin ? `<div class="public-dropzone" id="public-dropzone">
         <span class="public-drop-icon">⇧</span>
-        <div><strong>Dateien hier hineinziehen und ablegen</strong><small>Alle Dateiformate möglich · maximal 20 MB je Datei</small></div>
+        <div><strong>Dateien hier hineinziehen und ablegen</strong><small>Alle Dateiformate möglich · maximal ${getPortalSettings().uploadMaxMB || 20} MB je Datei</small></div>
       </div>` : ""}
 
       <div class="card public-card">
@@ -279,7 +280,7 @@ export async function renderPublicAreasModule(ctx) {
     const files = [...(fileList || [])]; if (!files.length) return;
     let uploaded = 0;
     for (const file of files) {
-      if (file.size > 20 * 1024 * 1024) { toast(`${file.name}: maximal 20 MB je Datei.`); continue; }
+      if (file.size > (getPortalSettings().uploadMaxMB || 20) * 1024 * 1024) { toast(`${file.name}: maximal ${getPortalSettings().uploadMaxMB || 20} MB je Datei.`); continue; }
       showBusy(`„${file.name}“ wird hochgeladen …`);
       try {
         const idToken = await token();

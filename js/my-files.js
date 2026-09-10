@@ -1,3 +1,4 @@
+import { getPortalSettings } from "./settings.js";
 import { auth, cloudFunctions } from "./firebase.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
 
@@ -97,7 +98,7 @@ export async function renderMyFilesModule(ctx) {
           <div class="myfiles-breadcrumbs" id="myfiles-breadcrumbs"></div>
           <div class="myfiles-dropzone" id="myfiles-dropzone">
             <span class="myfiles-drop-icon">⇧</span>
-            <div><strong>Dateien hier hineinziehen und ablegen</strong><small>oder oben „Dateien hochladen“ wählen · maximal 20 MB je Datei</small></div>
+            <div><strong>Dateien hier hineinziehen und ablegen</strong><small>oder oben „Dateien hochladen“ wählen · maximal ${getPortalSettings().uploadMaxMB || 20} MB je Datei</small></div>
           </div>
           <div class="card myfiles-card">
             <div class="myfiles-list-head">
@@ -314,7 +315,7 @@ export async function renderMyFilesModule(ctx) {
     const files = [...(fileList || [])];
     if (!files.length) return;
     for (const file of files) {
-      if (file.size > 20 * 1024 * 1024) { toast(`${file.name}: maximal 20 MB je Datei.`); continue; }
+      if (file.size > (getPortalSettings().uploadMaxMB || 20) * 1024 * 1024) { toast(`${file.name}: maximal ${getPortalSettings().uploadMaxMB || 20} MB je Datei.`); continue; }
       showBusy(`„${file.name}“ wird hochgeladen …`);
       try {
         const idToken = await token();

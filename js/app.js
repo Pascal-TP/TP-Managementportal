@@ -38,7 +38,8 @@ import {
   downloadOriginalFile,
   openPdfFile,
   initializeDocuments,
-  refreshDocuments
+  refreshDocuments,
+  applyDocumentSettings
 } from "./documents.js";
 import {
   createWorkflowTask,
@@ -57,21 +58,18 @@ import { renderMyFilesModule } from "./my-files.js";
 import { renderPublicAreasModule } from "./public-areas.js";
 import { loadArchive, restoreArchiveItem, permanentlyDeleteArchiveItem, getArchiveFileUrl } from "./archive.js";
 import { loadHistory } from "./history.js";
+import { loadPortalSettings, getPortalSettings, savePortalSettings, uploadCompanyLogo } from "./settings.js";
 
-const companies = [
-  "Alle Unternehmen",
-  "TP Holding GmbH",
-  "Norddeutsche Flächenheizsysteme GmbH",
-  "TGA Systemtechnik GmbH",
-  "Ulf Roesler GmbH",
-];
-const companyMeta = {
-  "TP Holding GmbH": { logo: "assets/tp.png", short: "TP Holding" },
-  "Norddeutsche Flächenheizsysteme GmbH": { logo: "assets/ndf.png", short: "NDF" },
-  "TGA Systemtechnik GmbH": { logo: "assets/tga.png", short: "TGA Systemtechnik" },
-  "Ulf Roesler GmbH": { logo: "assets/ur.png", short: "Ulf Roesler" },
-};
-const areas = ["Allgemein", "Arbeitssicherheit", "Personal", "Fuhrpark", "Qualitätsmanagement", "Einkauf / Lager", "Gebäudetechnik", "IT", "Vertrieb"];
+let companies = ["Alle Unternehmen"];
+let companyMeta = {};
+let areas = [];
+function applyPortalSettings(settings){
+  const rows=(settings.companies||[]).filter(x=>x.active!==false);
+  companies=["Alle Unternehmen",...rows.map(x=>x.name)];
+  companyMeta=Object.fromEntries(rows.map(x=>[x.name,{logo:x.logo||"assets/tp.png",short:x.short||x.name,id:x.id}]));
+  areas=(settings.areas||[]).filter(Boolean);
+  applyDocumentSettings(settings);
+}
 const fullNav = [
   ["dashboard", "▦", "Dashboard"],
   ["documents", "▤", "Dokumentenregister"],
@@ -249,7 +247,7 @@ function renderDashboard() {
   const recent = docs.slice(0, 5);
   const feedback = rejected.length ? `<div class="card rejection-card"><div class="card-head"><div><h2>Zur Überarbeitung zurückgegeben</h2><p>Diese Dokumente wurden abgelehnt. Der Ablehnungsgrund ist hinterlegt; anschließend können neue Dateien hochgeladen und der Workflow neu gestartet werden.</p></div></div><div class="task-list">${rejected.map(t => `<div class="task workflow-task"><div class="task-icon">!</div><div><strong>${esc(displayDocNo(getDocument(t.documentId)))}${displayDocNo(getDocument(t.documentId)) !== "–" ? " · " : ""}${esc(t.documentTitle)}</strong><span>${t.decisionNote ? `Grund: ${esc(t.decisionNote)}` : "Dokument wurde zur Überarbeitung zurückgegeben."}</span></div><button class="btn small" onclick="openRevisionDoc('${t.documentId}')">Überarbeiten</button></div>`).join("")}</div></div>` : "";
   content.innerHTML = `
-    <div class="kpi-grid"><button class="kpi kpi-button" type="button" onclick="render('documents')"><span>Freigegebene Dokumente</span><strong>${approved}</strong><small>aktuell veröffentlicht</small></button><button class="kpi kpi-button warn" type="button" onclick="render('workflow')"><span>Offene Workflows</span><strong>${openAll}</strong><small>${myTasks.length} Aufgabe(n) für Sie</small></button><button class="kpi kpi-button" type="button" onclick="render('documents')"><span>Dokumente gesamt</span><strong>${docs.length}</strong><small>ohne Archiv</small></button><button class="kpi kpi-button" type="button" onclick="render('companies')"><span>Unternehmen</span><strong>4</strong><small>zentral verwalten</small></button></div>
+    <div class="kpi-grid"><button class="kpi kpi-button" type="button" onclick="render('documents')"><span>Freigegebene Dokumente</span><strong>${approved}</strong><small>aktuell veröffentlicht</small></button><button class="kpi kpi-button warn" type="button" onclick="render('workflow')"><span>Offene Workflows</span><strong>${openAll}</strong><small>${myTasks.length} Aufgabe(n) für Sie</small></button><button class="kpi kpi-button" type="button" onclick="render('documents')"><span>Dokumente gesamt</span><strong>${docs.length}</strong><small>ohne Archiv</small></button><button class="kpi kpi-button" type="button" onclick="render('companies')"><span>Unternehmen</span><strong>${companies.length-1}</strong><small>zentral verwalten</small></button></div>
     ${feedback}
     <div class="two-col"><div class="card"><div class="card-head"><div><h2>Meine offenen Aufgaben</h2><p>Freigaben, die Ihnen persönlich zugewiesen wurden.</p></div><button class="btn secondary small" onclick="render('workflow')">Alle Aufgaben</button></div>${myTasks.length ? `<div class="task-list">${myTasks.map(t => taskRow(t, true)).join("")}</div>` : emptyState("Keine offenen Aufgaben", "Aktuell ist Ihnen kein Freigabeworkflow zugewiesen.")}</div>
     <div class="card"><div class="card-head"><div><h2>Dokumentenlenkung</h2><p>Neue Dokumente direkt hochladen und bei Bedarf einen Freigabeworkflow starten.</p></div></div><div class="quick-create"><strong>Neues Dokument einstellen</strong><p>Arbeits-, Verfahrens- und Betriebsanweisungen, Formulare/Vorlagen und Monatsberichte benötigen zwingend eine Freigabe. Dokumentnummer und Version werden bei diesen Dokumentarten durch QM vergeben.</p><button class="btn" onclick="openNewDoc()">+ Neues Dokument</button></div></div></div>
@@ -265,7 +263,7 @@ function renderEmployeeDashboard() {
   setHead("Dashboard", "Aktuelle Informationen und freigegebene Dokumente für Beschäftigte.");
   const rows = employeeDocs();
   const recent = rows.slice(0, 5);
-  content.innerHTML = `<div class="employee-welcome"><div><span class="employee-eyebrow">Mitarbeiterportal</span><h2>Alles Wichtige an einer Stelle</h2><p>Hier stehen die freigegebenen Unternehmensdokumente zur Verfügung. Neue oder geänderte Inhalte werden nach ihrer Freigabe automatisch sichtbar.</p></div><button class="btn" onclick="render('documents')">Zum Dokumentenregister</button></div><div class="kpi-grid employee-kpis"><div class="kpi"><span>Freigegebene Dokumente</span><strong>${rows.length}</strong><small>für Ihre Ansicht verfügbar</small></div><div class="kpi"><span>Unternehmen</span><strong>4</strong><small>zentral filterbar</small></div><div class="kpi"><span>Öffentliche Bereiche</span><strong>9</strong><small>Informationen & Vorlagen</small></div><div class="kpi"><span>Persönlicher Bereich</span><strong>1</strong><small>Meine Dateien</small></div></div><div class="card"><div class="card-head"><div><h2>Aktuelle Dokumente</h2><p>Zuletzt freigegebene Inhalte.</p></div><button class="btn secondary" onclick="render('documents')">Alle Dokumente</button></div>${employeeDocTable(recent)}</div>`;
+  content.innerHTML = `<div class="employee-welcome"><div><span class="employee-eyebrow">Mitarbeiterportal</span><h2>Alles Wichtige an einer Stelle</h2><p>Hier stehen die freigegebenen Unternehmensdokumente zur Verfügung. Neue oder geänderte Inhalte werden nach ihrer Freigabe automatisch sichtbar.</p></div><button class="btn" onclick="render('documents')">Zum Dokumentenregister</button></div><div class="kpi-grid employee-kpis"><div class="kpi"><span>Freigegebene Dokumente</span><strong>${rows.length}</strong><small>für Ihre Ansicht verfügbar</small></div><div class="kpi"><span>Unternehmen</span><strong>${companies.length-1}</strong><small>zentral filterbar</small></div><div class="kpi"><span>Öffentliche Bereiche</span><strong>9</strong><small>Informationen & Vorlagen</small></div><div class="kpi"><span>Persönlicher Bereich</span><strong>1</strong><small>Meine Dateien</small></div></div><div class="card"><div class="card-head"><div><h2>Aktuelle Dokumente</h2><p>Zuletzt freigegebene Inhalte.</p></div><button class="btn secondary" onclick="render('documents')">Alle Dokumente</button></div>${employeeDocTable(recent)}</div>`;
 }
 function renderEmployeeDocuments() {
   setHead("Dokumentenregister", "Freigegebene Unternehmensdokumente zentral abrufen.");
@@ -377,9 +375,27 @@ async function renderHistory() {
   } catch(err) { content.innerHTML = `<div class="card">${emptyState("Historie konnte nicht geladen werden", err.message || "Bitte später erneut versuchen.")}</div>`; }
 }
 
-function renderSettings() {
-  setHead("Systemeinstellungen", "Dokumentarten und Workflow-Grundregeln.");
-  content.innerHTML = `<div class="three-col"><div class="card"><h2>Pflicht-Workflow</h2><p class="muted"><strong>Arbeitsanweisung</strong><br><strong>Verfahrensanweisung</strong><br><strong>Betriebsanweisung</strong><br><strong>Formular / Vorlage</strong><br><strong>Monatsbericht</strong><br><br>Diese Dokumentarten können nicht ohne Freigabeworkflow veröffentlicht werden.</p></div><div class="card"><h2>Optionaler Workflow</h2><p class="muted">Bei allen anderen Dokumentarten kann beim Hochladen freiwillig ein Kollege für Prüfung/Freigabe ausgewählt werden.</p></div><div class="card"><h2>QM-Endfreigabe</h2><p class="muted">Gelenkte Dokumente werden nach der fachlichen Prüfung automatisch an den Benutzer <strong>QM</strong> weitergeleitet. Nur QM vergibt die endgültige Dokumentnummer und Version und veröffentlicht.</p></div></div>`;
+function renderSettings(){
+  if(currentProfile?.role!=="admin"){ setHead("Systemeinstellungen","Nur für Administratoren."); content.innerHTML=`<div class="card">${emptyState("Kein Zugriff","Dieser Bereich steht ausschließlich Administratoren zur Verfügung.")}</div>`; return; }
+  const cfg=getPortalSettings();
+  setHead("Systemeinstellungen","Zentrale Konfiguration des TP-Managementportals.");
+  const companiesHtml=(cfg.companies||[]).map((c,i)=>`<div class="settings-row" data-company-index="${i}"><input value="${esc(c.name)}" data-f="name" placeholder="Unternehmensname"><input value="${esc(c.short||'')}" data-f="short" placeholder="Kurzname"><input value="${esc(c.logo||'')}" data-f="logo" placeholder="Logo-Pfad"><label class="mini-check"><input type="checkbox" data-f="active" ${c.active!==false?'checked':''}> aktiv</label><input type="file" accept="image/*" data-logo-upload="${i}"></div>`).join('');
+  const typesHtml=(cfg.documentTypes||[]).map((d,i)=>`<div class="settings-doc-row" data-type-index="${i}"><input value="${esc(d.name)}" data-f="name" placeholder="Dokumentenart"><input class="prefix-input" value="${esc(d.prefix||'')}" data-f="prefix" maxlength="8"><input type="number" min="1" value="${Number(d.nextNumber||1)}" data-f="nextNumber" title="Nächste laufende Nummer"><label><input type="checkbox" data-f="workflow" ${d.workflow?'checked':''}> Workflow</label><label><input type="checkbox" data-f="qmNumber" ${d.qmNumber?'checked':''}> QM-Nr.</label><label><input type="checkbox" data-f="qmVersion" ${d.qmVersion?'checked':''}> QM-Version</label><label><input type="checkbox" data-f="retentionLocked" ${d.retentionLocked?'checked':''}> dauerhaft archivieren</label><label><input type="checkbox" data-f="active" ${d.active!==false?'checked':''}> aktiv</label></div>`).join('');
+  content.innerHTML=`<div class="settings-grid">
+    <div class="card settings-card"><div class="card-head"><div><h2>Unternehmen & Unternehmensbereiche</h2><p>Bestehende Unternehmen können vollständig angepasst werden. Neue Unternehmen und Bereiche lassen sich ergänzen.</p></div><button class="btn secondary" id="add-company">Unternehmen hinzufügen</button></div><div id="settings-companies">${companiesHtml}</div><h3>Unternehmensbereiche</h3><textarea id="settings-areas" rows="7">${esc((cfg.areas||[]).join('\n'))}</textarea><small class="field-hint">Ein Bereich pro Zeile.</small></div>
+    <div class="card settings-card"><div class="card-head"><div><h2>Dokumentenarten & Dokumentenlenkung</h2><p>Workflow-, QM- und Archivregeln zentral festlegen.</p></div><button class="btn secondary" id="add-doc-type">Dokumentenart hinzufügen</button></div><div class="settings-doc-head"><span>Dokumentenart</span><span>Präfix</span><span>Nächste Nr.</span><span>Regeln</span></div><div id="settings-types">${typesHtml}</div></div>
+    <div class="card settings-card"><h2>Nummernkreise</h2><p class="muted">Der Präfix jeder Dokumentenart wird oben gepflegt. Die nächste Nummer wird weiterhin automatisch aus den vorhandenen Dokumentnummern ermittelt und QM nur vorgeschlagen.</p></div>
+    <div class="card settings-card"><h2>Archiv & Historie</h2><label class="setting-field">Normale Archivobjekte automatisch löschen <input id="archive-auto" type="checkbox" ${cfg.archiveAutoCleanup?'checked':''}></label><label class="setting-field">Aufbewahrungsdauer in Tagen <input id="archive-days" type="number" min="1" max="3650" value="${Number(cfg.archiveRetentionDays||90)}"></label><div class="info-strip"><strong>Schutz bleibt bestehen:</strong> QM-gelenkte Dokumente und deren Versionen werden niemals automatisch oder endgültig gelöscht. Die Historie bleibt unveränderbar.</div></div>
+    <div class="card settings-card"><h2>Dateien & Uploads</h2><label class="setting-field">Maximale Dateigröße je Upload (MB) <input id="upload-max" type="number" min="1" max="50" value="${Number(cfg.uploadMaxMB||20)}"></label><p class="muted">Gilt zentral für Dokumentenregister, „Meine Dateien“ und „Öffentliche Bereiche“. Aufgrund des aktuellen Callable-Uploads sind maximal 50 MB vorgesehen.</p></div>
+  </div><div class="settings-savebar"><button class="btn" id="save-settings">Einstellungen speichern</button></div>`;
+  bindSettingsUi();
+}
+
+function bindSettingsUi(){
+  document.querySelector('#add-company')?.addEventListener('click',()=>{const cfg=getPortalSettings();cfg.companies.push({id:'c'+Date.now(),name:'Neues Unternehmen',short:'',logo:'assets/tp.png',active:true});renderSettings();});
+  document.querySelector('#add-doc-type')?.addEventListener('click',()=>{const cfg=getPortalSettings();cfg.documentTypes.push({name:'Neue Dokumentenart',prefix:'DOK',nextNumber:1,workflow:false,qmNumber:false,qmVersion:false,retentionLocked:false,active:true});renderSettings();});
+  document.querySelectorAll('[data-logo-upload]').forEach(inp=>inp.addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;const i=Number(e.target.dataset.logoUpload);try{toast('Logo wird hochgeladen …');const uploaded=await uploadCompanyLogo(f,getPortalSettings().companies[i].id);getPortalSettings().companies[i].logoStoragePath=uploaded.logoStoragePath;getPortalSettings().companies[i].logo=uploaded.logoUrl;renderSettings();toast('Logo hochgeladen. Bitte Einstellungen speichern.');}catch(err){toast(err.message||'Logo konnte nicht hochgeladen werden.');}}));
+  document.querySelector('#save-settings')?.addEventListener('click',async()=>{try{const cfg=structuredClone(getPortalSettings());document.querySelectorAll('[data-company-index]').forEach(r=>{const i=Number(r.dataset.companyIndex);r.querySelectorAll('[data-f]').forEach(x=>cfg.companies[i][x.dataset.f]=x.type==='checkbox'?x.checked:x.value.trim());});document.querySelectorAll('[data-type-index]').forEach(r=>{const i=Number(r.dataset.typeIndex);r.querySelectorAll('[data-f]').forEach(x=>cfg.documentTypes[i][x.dataset.f]=x.type==='checkbox'?x.checked:(x.dataset.f==='nextNumber'?Math.max(1,Number(x.value||1)):x.value.trim()));});cfg.areas=document.querySelector('#settings-areas').value.split(/\n+/).map(x=>x.trim()).filter(Boolean);cfg.archiveAutoCleanup=document.querySelector('#archive-auto').checked;cfg.archiveRetentionDays=Math.max(1,Number(document.querySelector('#archive-days').value||90));cfg.uploadMaxMB=Math.min(50,Math.max(1,Number(document.querySelector('#upload-max').value||20)));await savePortalSettings(cfg);applyPortalSettings(cfg);toast('Systemeinstellungen gespeichert.');renderSettings();}catch(err){toast(err.message||'Einstellungen konnten nicht gespeichert werden.');}});
 }
 
 async function openDoc(id) {
@@ -721,6 +737,8 @@ async function applyProfile(profile, user) {
   if (settingsBtn) settingsBtn.style.display = profile.role === "admin" ? "" : "none";
   colleagues = await loadAssignableColleagues();
   qmUser = await loadQmUser();
+  const portalSettings = await loadPortalSettings();
+  applyPortalSettings(portalSettings);
   await Promise.all([initializeDocuments(), initializeWorkflows()]);
   current = "dashboard";
   render("dashboard");
@@ -731,7 +749,7 @@ async function showPortal(profile, user) { document.querySelector("#login-messag
 Object.assign(window, { render, openDoc, openNewDoc, openEditDoc, openReviewTask, finishReview, openQmTask, finishQmTask, openRevisionDoc, closeModal, toast, archiveCurrentDoc, deleteCurrentDoc, editCurrentDoc, openPdfCurrentDoc, restoreArchive, deleteArchiveForever, openArchiveItem });
 document.querySelector("#settings-link").onclick = () => render("settings");
 document.querySelector("#logout-btn").onclick = () => logout();
-document.querySelector("#portal-info").onclick = () => { modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal</h2><p>Version 2.0</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Zentrale Plattform für Unternehmensdokumente, Freigabeworkflows, öffentliche Informationen, persönliche Dateien und freigegebene Arbeitsbereiche.</p><p style="font-size:12px;line-height:1.65"><strong>V2.0:</strong> Dokumentenregister und Workflows arbeiten nun vollständig zentral. Zusätzlich stehen ein personenbezogenes Archiv sowie eine zentrale, nur für Admins sichtbare Historie zur Verfügung. Frühere QM-Dokumentstände bleiben dauerhaft erhalten.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Schließen</button></div></div>`; modal.showModal(); };
+document.querySelector("#portal-info").onclick = () => { modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal</h2><p>Version 3.0</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Zentrale Plattform für Unternehmensdokumente, Freigabeworkflows, öffentliche Informationen, persönliche Dateien und freigegebene Arbeitsbereiche.</p><p style="font-size:12px;line-height:1.65"><strong>V3.0:</strong> Systemeinstellungen verwalten Unternehmen und Bereiche, Dokumentenarten und Lenkungsregeln, Nummernkreise, Archiv-Aufbewahrung sowie zentrale Uploadgrenzen.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Schließen</button></div></div>`; modal.showModal(); };
 document.querySelector("#personalmanagement-link").onclick = () => { const url = localStorage.getItem("tpPersonalmanagementUrl") || ""; if (url) window.open(url, "_blank", "noopener"); else toast("Die produktive URL des TP-Personalmanagements wird hier noch hinterlegt."); };
 document.querySelector("#login-form").addEventListener("submit", async e => { e.preventDefault(); const msg = document.querySelector("#login-message"); msg.textContent = "Anmeldung läuft …"; try { await login(document.querySelector("#login-identifier").value, document.querySelector("#login-password").value); } catch (err) { console.error(err); msg.textContent = "Anmeldung nicht möglich. Bitte Zugangsdaten prüfen."; } });
 document.querySelector("#forgot-password-btn").onclick = async () => { try { await requestPasswordReset(document.querySelector("#login-identifier").value); toast("Passwort-Link wurde angefordert."); } catch (err) { toast(err.message || "Passwort-Link konnte nicht angefordert werden."); } };
