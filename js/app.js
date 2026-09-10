@@ -50,6 +50,7 @@ import {
   deleteWorkflowTasksForDocument
 } from "./workflows.js";
 import { renderMyFilesModule } from "./my-files.js";
+import { renderPublicAreasModule } from "./public-areas.js";
 
 const companies = [
   "Alle Unternehmen",
@@ -305,9 +306,16 @@ function renderDeadlines() {
 }
 
 function renderAreas() {
-  setHead("Öffentliche Bereiche", "Zentrale Dateien und Informationen für alle Beschäftigten.");
-  const folders = [["📁","Ansprechpartner","Kontaktdaten und Zuständigkeiten"],["📁","Arbeitssicherheit","Informationen, Hinweise und Unterlagen"],["📁","Doku-Management","Allgemeine Dokumentation"],["📁","Flyer_Unternehmenspräsentation","Freigegebene Flyer und Präsentationen"],["📁","Fotos","Öffentlich bereitgestellte Unternehmensfotos"],["📁","Geburtstagsliste","Aktuelle Geburtstagsübersicht"],["📁","Organigramm","Organigramme des Unternehmensverbunds"],["📁","Video","Freigegebene Videos"],["📁","Vorlagen & Layouts","Word-, Excel- und Layoutvorlagen zum Download"]];
-  content.innerHTML = `<div class="card"><div class="card-head"><div><h2>Öffentlicher Bereich</h2><p>Gemeinsam genutzte Inhalte werden zentral im TP-Managementportal bereitgestellt.</p></div>${portalView !== "employee" ? '<button class="btn" onclick="toast(\'Ordnerverwaltung folgt in einem eigenen Modul.\')">+ Neuer Ordner</button>' : ''}</div><div class="folder-list">${folders.map(f => `<button class="folder-row" onclick="toast('Ordner ${f[1]} geöffnet.')"><span class="folder-icon">${f[0]}</span><span><strong>${f[1]}</strong><small>${f[2]}</small></span><span class="folder-arrow">›</span></button>`).join("")}</div></div>`;
+  setHead("Öffentliche Bereiche", "Zentrale Dateien, Informationen und Links für alle Beschäftigten.");
+  renderPublicAreasModule({
+    content,
+    modal,
+    modalContent,
+    esc,
+    toast,
+    profile: currentProfile,
+    user: currentUser
+  });
 }
 function renderMyFiles() {
   if (portalView === "employee") return render("dashboard");
@@ -689,7 +697,7 @@ async function showPortal(profile, user) { document.querySelector("#login-messag
 Object.assign(window, { render, openDoc, openNewDoc, openEditDoc, openReviewTask, finishReview, openQmTask, finishQmTask, openRevisionDoc, closeModal, toast, archiveCurrentDoc, deleteCurrentDoc, editCurrentDoc, openPdfCurrentDoc });
 document.querySelector("#settings-link").onclick = () => render("settings");
 document.querySelector("#logout-btn").onclick = () => logout();
-document.querySelector("#portal-info").onclick = () => { modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal</h2><p>Version 0.9.1</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Zentrale Plattform für Unternehmensdokumente, Freigabeworkflows, öffentliche Informationen, persönliche Dateien und freigegebene Arbeitsbereiche.</p><p style="font-size:12px;line-height:1.65"><strong>V0.9.1:</strong> Gelenkte Dokumentarten erhalten Dokumentnummer und Version ausschließlich durch QM. Monatsberichte wurden ergänzt. Dashboard-Kennzahlen führen nun direkt in die jeweiligen Bereiche.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Schließen</button></div></div>`; modal.showModal(); };
+document.querySelector("#portal-info").onclick = () => { modalContent.innerHTML = `<div class="modal-box"><div class="modal-head"><div><h2>TP-Managementportal</h2><p>Version 1.0</p></div><button class="close-btn" onclick="closeModal()">×</button></div><p style="font-size:12px;line-height:1.65">Zentrale Plattform für Unternehmensdokumente, Freigabeworkflows, öffentliche Informationen, persönliche Dateien und freigegebene Arbeitsbereiche.</p><p style="font-size:12px;line-height:1.65"><strong>V1.0:</strong> Der Bereich „Öffentliche Bereiche“ ist nun ein vollständiger gemeinsamer Datei- und Informationsbereich. Alle Portalnutzer können Inhalte lesen; ausschließlich Admins können Ordner, Unterordner, Dateien und Web-Links verwalten.</p><div class="modal-footer"><button class="btn" onclick="closeModal()">Schließen</button></div></div>`; modal.showModal(); };
 document.querySelector("#personalmanagement-link").onclick = () => { const url = localStorage.getItem("tpPersonalmanagementUrl") || ""; if (url) window.open(url, "_blank", "noopener"); else toast("Die produktive URL des TP-Personalmanagements wird hier noch hinterlegt."); };
 document.querySelector("#login-form").addEventListener("submit", async e => { e.preventDefault(); const msg = document.querySelector("#login-message"); msg.textContent = "Anmeldung läuft …"; try { await login(document.querySelector("#login-identifier").value, document.querySelector("#login-password").value); } catch (err) { console.error(err); msg.textContent = "Anmeldung nicht möglich. Bitte Zugangsdaten prüfen."; } });
 document.querySelector("#forgot-password-btn").onclick = async () => { try { await requestPasswordReset(document.querySelector("#login-identifier").value); toast("Passwort-Link wurde angefordert."); } catch (err) { toast(err.message || "Passwort-Link konnte nicht angefordert werden."); } };
