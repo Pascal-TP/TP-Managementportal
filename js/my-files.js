@@ -226,7 +226,13 @@ export async function renderMyFilesModule(ctx) {
   }
 
   function drawBreadcrumbs() {
-    const root = `<button data-folder="" class="myfiles-crumb ${state.folderId ? "" : "active"}">Meine Dateien</button>`;
+    if (!state.folderId) {
+      crumbs.innerHTML = "";
+      crumbs.hidden = true;
+      return;
+    }
+    crumbs.hidden = false;
+    const root = `<button data-folder="" class="myfiles-crumb">Meine Dateien</button>`;
     const rest = state.breadcrumbs.map((b, i) => `<span>›</span><button data-folder="${safeEsc(esc, b.id)}" class="myfiles-crumb ${i === state.breadcrumbs.length - 1 ? "active" : ""}">${safeEsc(esc, b.name)}</button>`).join("");
     crumbs.innerHTML = root + rest;
     crumbs.querySelectorAll("[data-folder]").forEach(btn => btn.onclick = () => {
@@ -348,7 +354,7 @@ export async function renderMyFilesModule(ctx) {
   async function deleteItem(kind, id) {
     const item = kind === "folder" ? state.items.folders.find(x => x.id === id) : state.items.files.find(x => x.id === id);
     if (!item) return;
-    const message = kind === "folder" ? `Ordner „${item.name}“ einschließlich aller Unterordner und Dateien endgültig löschen?` : `Datei „${item.name}“ endgültig löschen?`;
+    const message = kind === "folder" ? `Leeren Ordner „${item.name}“ endgültig löschen?` : `Datei „${item.name}“ endgültig löschen?`;
     if (!confirm(message)) return;
     try {
       const idToken = await token();

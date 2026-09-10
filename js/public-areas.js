@@ -127,7 +127,13 @@ export async function renderPublicAreasModule(ctx) {
   }
 
   function drawBreadcrumbs() {
-    const root = `<button data-public-folder="" class="public-crumb ${state.folderId ? "" : "active"}">Öffentliche Bereiche</button>`;
+    if (!state.folderId) {
+      crumbs.innerHTML = "";
+      crumbs.hidden = true;
+      return;
+    }
+    crumbs.hidden = false;
+    const root = `<button data-public-folder="" class="public-crumb">Öffentliche Bereiche</button>`;
     const rest = state.breadcrumbs.map((b, i) => `<span>›</span><button data-public-folder="${safeEsc(esc, b.id)}" class="public-crumb ${i === state.breadcrumbs.length - 1 ? "active" : ""}">${safeEsc(esc, b.name)}</button>`).join("");
     crumbs.innerHTML = root + rest;
     crumbs.querySelectorAll("[data-public-folder]").forEach(btn => btn.onclick = () => {
@@ -306,7 +312,7 @@ export async function renderPublicAreasModule(ctx) {
   async function deleteItem(kind, id) {
     const source = kind === "folder" ? state.items.folders : kind === "file" ? state.items.files : state.items.links;
     const item = source.find(x => x.id === id); if (!item) return;
-    const message = kind === "folder" ? `Ordner „${item.name}“ einschließlich aller Unterordner, Dateien und Links endgültig löschen?` : `${kind === "link" ? "Link" : "Datei"} „${item.name}“ endgültig löschen?`;
+    const message = kind === "folder" ? `Leeren Ordner „${item.name}“ endgültig löschen?` : `${kind === "link" ? "Link" : "Datei"} „${item.name}“ endgültig löschen?`;
     if (!confirm(message)) return;
     try {
       const idToken = await token();
