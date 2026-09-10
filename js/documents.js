@@ -8,6 +8,7 @@ export const DOCUMENT_TYPES = [
   "Verfahrensanweisung",
   "Betriebsanweisung",
   "Formular / Vorlage",
+  "Monatsbericht",
   "Sicherheitsdatenblatt",
   "Richtlinie",
   "Zertifikat",
@@ -20,13 +21,18 @@ export const MANDATORY_WORKFLOW_TYPES = new Set([
   "Arbeitsanweisung",
   "Verfahrensanweisung",
   "Betriebsanweisung",
+  "Formular / Vorlage",
+  "Monatsbericht",
 ]);
+
+export const QM_CONTROLLED_TYPES = MANDATORY_WORKFLOW_TYPES;
 
 const PREFIX = {
   "Arbeitsanweisung": "AA",
   "Verfahrensanweisung": "VA",
   "Betriebsanweisung": "BA",
   "Formular / Vorlage": "FO",
+  "Monatsbericht": "MB",
   "Sicherheitsdatenblatt": "SDB",
   Richtlinie: "RL",
   Zertifikat: "ZERT",
@@ -138,6 +144,31 @@ export function generateDocumentNumber(type) {
   return `${prefix}.${String(max + 1).padStart(3, "0")}.01`;
 }
 
+export function generateNextVersion(currentVersion = "") {
+  const raw = String(currentVersion || "").trim();
+  if (!raw || raw === "–") return "1.0";
+  const match = raw.match(/^(\d+)(?:\.(\d+))?$/);
+  if (!match) return raw;
+  const major = Number(match[1]);
+  const minor = Number(match[2] || 0);
+  return `${major}.${minor + 1}`;
+}
+
+export function setDocumentVersionByQm(id, version, by = "") {
+  const clean = String(version || "").trim();
+  if (!clean) throw new Error("Bitte eine Version vergeben.");
+  const rows = readMeta();
+  const d = rows.find((x) => x.id === id);
+  if (!d) throw new Error("Dokument wurde nicht gefunden.");
+  const old = String(d.version || "–");
+  d.version = clean;
+  d.updatedAt = new Date().toISOString();
+  d.history = Array.isArray(d.history) ? d.history : [];
+  d.history.unshift({ at: d.updatedAt, action: `Version durch QM von „${old}“ auf „${clean}“ gesetzt`, by });
+  writeMeta(rows);
+  return d;
+}
+
 export function generateTemporaryDocumentId() {
   return `ENTW-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -224,12 +255,12 @@ export async function createDocument(payload, sourceFile, pdfFile = null) {
   const doc = {
     id,
     numberRequired,
-    numberAssigned: !numberRequired,
+    numberAssigned: numberRequired ? false : true,
     title: payload.title.trim(),
     type: payload.type,
     area: payload.area.trim() || "Allgemein",
     company: payload.company,
-    version: payload.version || "1.0",
+    version: payload.version || (numberRequired ? "–" : "1.0"),
     status: initialStatus,
     owner: payload.owner || "",
     review: payload.review || "–",
@@ -354,7 +385,7 @@ export function sendDocumentToQm(id, qmUser, by = "", note = "") {
   d.updatedAt = new Date().toISOString();
   d.history = Array.isArray(d.history) ? d.history : [];
   const suffix = note ? ` · Hinweis aus Prüfung: ${note}` : "";
-  d.history.unshift({ at: d.updatedAt, action: `Fachliche Prüfung abgeschlossen; an QM zur Nummernvergabe und Veröffentlichung weitergeleitet${suffix}`, by });
+  d.history.unshift({ at: d.updatedAt, action: `Fachliche Prüfung abgeschlossen; an QM zur Dokumentnummern- und Versionsvergabe weitergeleitet${suffix}`, by });
   writeMeta(rows);
   return d;
 }
