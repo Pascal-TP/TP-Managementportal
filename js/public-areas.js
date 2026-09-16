@@ -330,12 +330,12 @@ export async function renderPublicAreasModule(ctx) {
   async function deleteItem(kind, id) {
     const source = kind === "folder" ? state.items.folders : kind === "file" ? state.items.files : state.items.links;
     const item = source.find(x => x.id === id); if (!item) return;
-    const message = kind === "folder" ? `Leeren Ordner „${item.name}“ endgültig löschen?` : `${kind === "link" ? "Link" : "Datei"} „${item.name}“ endgültig löschen?`;
+    const message = kind === "folder" ? `Leeren Ordner „${item.name}“ in das Archiv verschieben?` : `${kind === "link" ? "Link" : "Datei"} „${item.name}“ in das Archiv verschieben?`;
     if (!confirm(message)) return;
     try {
       const idToken = await token();
       await callDelete({ idToken, kind, itemId: id });
-      toast(kind === "folder" ? "Ordner wurde gelöscht." : kind === "link" ? "Link wurde gelöscht." : "Datei wurde gelöscht.");
+      toast(kind === "folder" ? "Ordner wurde in das Archiv verschoben." : kind === "link" ? "Link wurde in das Archiv verschoben." : "Datei wurde in das Archiv verschoben.");
       await loadCurrent();
     } catch (err) { toast(errorText(err, "Löschen fehlgeschlagen.")); }
   }

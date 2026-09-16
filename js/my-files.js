@@ -376,12 +376,12 @@ export async function renderMyFilesModule(ctx) {
   async function deleteItem(kind, id) {
     const item = kind === "folder" ? state.items.folders.find(x => x.id === id) : state.items.files.find(x => x.id === id);
     if (!item) return;
-    const message = kind === "folder" ? `Leeren Ordner „${item.name}“ endgültig löschen?` : `Datei „${item.name}“ endgültig löschen?`;
+    const message = kind === "folder" ? `Leeren Ordner „${item.name}“ in das Archiv verschieben?` : `Datei „${item.name}“ in das Archiv verschieben?`;
     if (!confirm(message)) return;
     try {
       const idToken = await token();
       await callDelete({ idToken, kind, itemId: id });
-      toast(kind === "folder" ? "Ordner wurde gelöscht." : "Datei wurde gelöscht.");
+      toast(kind === "folder" ? "Ordner wurde in das Archiv verschoben." : "Datei wurde in das Archiv verschoben.");
       if (kind === "folder") await refreshTreeAfterMutation(); else await loadCurrent();
     } catch (err) { toast(errorText(err, "Löschen fehlgeschlagen.")); }
   }
