@@ -9,6 +9,9 @@ const callRename = httpsCallable(cloudFunctions, "renameManagementPortalPrivateI
 const callDelete = httpsCallable(cloudFunctions, "deleteManagementPortalPrivateItem");
 const callUrl = httpsCallable(cloudFunctions, "getManagementPortalPrivateFileUrl");
 const callFavorite = httpsCallable(cloudFunctions, "setManagementPortalPrivateFavorite");
+const callDeadline = httpsCallable(cloudFunctions, "setManagementPortalPrivateFileDeadline");
+const callPrepareLargeVideo = httpsCallable(cloudFunctions, "prepareManagementPortalLargeVideoUpload");
+const callFinalizeLargeVideo = httpsCallable(cloudFunctions, "finalizeManagementPortalLargeVideoUpload");
 
 const state = {
   folderId: null,
@@ -98,7 +101,7 @@ export async function renderMyFilesModule(ctx) {
           <div class="myfiles-breadcrumbs" id="myfiles-breadcrumbs"></div>
           <div class="myfiles-dropzone" id="myfiles-dropzone">
             <span class="myfiles-drop-icon">⇧</span>
-            <div><strong>Dateien hier hineinziehen und ablegen</strong><small>oder oben „Dateien hochladen“ wählen · maximal ${getPortalSettings().uploadMaxMB || 20} MB je Datei</small></div>
+            <div><strong>Dateien hier hineinziehen und ablegen</strong><small>oder oben „Dateien hochladen“ wählen · maximal ${getPortalSettings().uploadMaxMB || 20} MB je Datei · Videos ohne Portal-Größenlimit</small></div>
           </div>
           <div class="card myfiles-card">
             <div class="myfiles-list-head">
@@ -263,6 +266,7 @@ export async function renderMyFilesModule(ctx) {
       <div class="myfiles-actions">
         <button class="icon-btn" data-favorite-file="${safeEsc(esc, file.id)}" title="Favorit">${file.favorite ? "★" : "☆"}</button>
         <button class="btn small" data-open-file="${safeEsc(esc, file.id)}">${primary}</button>
+        <button class="btn secondary small" data-deadline-file="${safeEsc(esc, file.id)}">${file.deadline ? `Frist: ${new Date(file.deadline+"T00:00:00").toLocaleDateString("de-DE")}` : "Frist"}</button>
         <button class="btn secondary small" data-rename-file="${safeEsc(esc, file.id)}">Umbenennen</button>
         <button class="btn danger small" data-delete-file="${safeEsc(esc, file.id)}">Löschen</button>
       </div></div>`;
@@ -287,6 +291,7 @@ export async function renderMyFilesModule(ctx) {
     list.querySelectorAll("[data-open-file]").forEach(btn => btn.onclick = () => openFile(btn.dataset.openFile));
     list.querySelectorAll("[data-rename-folder]").forEach(btn => btn.onclick = () => renameItem("folder", btn.dataset.renameFolder));
     list.querySelectorAll("[data-rename-file]").forEach(btn => btn.onclick = () => renameItem("file", btn.dataset.renameFile));
+    list.querySelectorAll("[data-deadline-file]").forEach(btn => btn.onclick = () => deadlineDialog(btn.dataset.deadlineFile));
     list.querySelectorAll("[data-delete-folder]").forEach(btn => btn.onclick = () => deleteItem("folder", btn.dataset.deleteFolder));
     list.querySelectorAll("[data-delete-file]").forEach(btn => btn.onclick = () => deleteItem("file", btn.dataset.deleteFile));
     list.querySelectorAll("[data-favorite-folder]").forEach(btn => btn.onclick = () => favoriteItem("folder", btn.dataset.favoriteFolder));
@@ -311,20 +316,36 @@ export async function renderMyFilesModule(ctx) {
     };
   }
 
+  function isVideo(file){ return String(file?.type||"").toLowerCase().startsWith("video/") || /\.(mp4|mov|m4v|avi|wmv|webm|mkv|mpeg|mpg)$/i.test(file?.name||""); }
+  function duplicate(file){ return (state.items.files||[]).find(x => String(x.name||"").toLocaleLowerCase("de-DE") === String(file.name||"").toLocaleLowerCase("de-DE")); }
+  async function directVideoUpload(file, overwrite){
+    const idToken=await token();
+    const prep=unwrap(await callPrepareLargeVideo({idToken,area:"private",parentId:state.folderId,fileName:file.name,contentType:file.type||"application/octet-stream",size:file.size,overwrite}));
+    const response=await fetch(prep.uploadUrl,{method:"PUT",headers:{"Content-Type":file.type||"application/octet-stream"},body:file});
+    if(!response.ok) throw new Error(`Direktupload fehlgeschlagen (${response.status}).`);
+    await callFinalizeLargeVideo({idToken,area:"private",parentId:state.folderId,fileId:prep.fileId,storagePath:prep.storagePath,name:prep.name,contentType:file.type||"application/octet-stream",size:file.size,oldStoragePath:prep.oldStoragePath||null});
+  }
   async function uploadFiles(fileList) {
-    const files = [...(fileList || [])];
-    if (!files.length) return;
+    const files = [...(fileList || [])]; if (!files.length) return; let uploaded=0;
     for (const file of files) {
-      if (file.size > (getPortalSettings().uploadMaxMB || 20) * 1024 * 1024) { toast(`${file.name}: maximal ${getPortalSettings().uploadMaxMB || 20} MB je Datei.`); continue; }
+      const existing=duplicate(file); let overwrite=false;
+      if(existing){ overwrite=confirm("Eine Datei mit identischen Namen existiert bereits. Möchten Sie diese überschreiben?"); if(!overwrite) continue; }
+      if (!isVideo(file) && file.size > (getPortalSettings().uploadMaxMB || 20) * 1024 * 1024) { toast(`${file.name}: maximal ${getPortalSettings().uploadMaxMB || 20} MB je Datei.`); continue; }
       showBusy(`„${file.name}“ wird hochgeladen …`);
       try {
-        const idToken = await token();
-        const base64Data = await fileToBase64(file);
-        await callUpload({ idToken, parentId: state.folderId, fileName: file.name, contentType: file.type || "application/octet-stream", base64Data });
+        if(isVideo(file) && file.size > (getPortalSettings().uploadMaxMB || 20)*1024*1024) await directVideoUpload(file,overwrite);
+        else { const idToken=await token(); const base64Data=await fileToBase64(file); await callUpload({idToken,parentId:state.folderId,fileName:file.name,contentType:file.type||"application/octet-stream",base64Data,overwrite}); }
+        uploaded++;
       } catch (err) { toast(`${file.name}: ${errorText(err, "Upload fehlgeschlagen.")}`); }
     }
-    toast(files.length === 1 ? "Datei wurde hochgeladen." : "Dateiupload abgeschlossen.");
-    await loadCurrent();
+    if(uploaded) toast(uploaded===1?"Datei wurde hochgeladen.":`${uploaded} Dateien wurden hochgeladen.`); await loadCurrent();
+  }
+
+  async function deadlineDialog(id){
+    const item=(state.items.files||[]).find(x=>x.id===id); if(!item)return;
+    modalContent.innerHTML=`<form id="deadline-form" class="modal-box small-modal"><div class="modal-head"><div><h2>Frist festlegen</h2><p>${safeEsc(esc,item.name)}</p></div><button class="close-btn" type="button">×</button></div><label class="field full"><span>Frist</span><input id="deadline-date" type="date" value="${safeEsc(esc,item.deadline||"")}"><small class="field-hint">Datum leeren, um eine vorhandene Frist zu entfernen.</small></label><div class="modal-footer"><button type="button" class="btn secondary" id="deadline-cancel">Abbrechen</button><button type="submit" class="btn">Speichern</button></div></form>`;
+    modal.showModal(); const close=()=>modal.close(); modalContent.querySelector(".close-btn").onclick=close; modalContent.querySelector("#deadline-cancel").onclick=close;
+    modalContent.querySelector("#deadline-form").onsubmit=async e=>{e.preventDefault();try{await callDeadline({idToken:await token(),fileId:id,deadline:modalContent.querySelector("#deadline-date").value||null});close();toast("Frist wurde gespeichert.");await loadCurrent();}catch(err){toast(errorText(err,"Frist konnte nicht gespeichert werden."));}};
   }
 
   async function openFile(fileId) {

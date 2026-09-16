@@ -9,6 +9,8 @@ const callCreateLink = httpsCallable(cloudFunctions, "createManagementPortalPubl
 const callUpload = httpsCallable(cloudFunctions, "uploadManagementPortalPublicFile");
 const callUrl = httpsCallable(cloudFunctions, "getManagementPortalPublicFileUrl");
 const callDelete = httpsCallable(cloudFunctions, "deleteManagementPortalPublicItem");
+const callPrepareLargeVideo = httpsCallable(cloudFunctions, "prepareManagementPortalLargeVideoUpload");
+const callFinalizeLargeVideo = httpsCallable(cloudFunctions, "finalizeManagementPortalLargeVideoUpload");
 
 const state = {
   folderId: null,
@@ -91,7 +93,7 @@ export async function renderPublicAreasModule(ctx) {
 
       ${isAdmin ? `<div class="public-dropzone" id="public-dropzone">
         <span class="public-drop-icon">⇧</span>
-        <div><strong>Dateien hier hineinziehen und ablegen</strong><small>Alle Dateiformate möglich · maximal ${getPortalSettings().uploadMaxMB || 20} MB je Datei</small></div>
+        <div><strong>Dateien hier hineinziehen und ablegen</strong><small>Alle Dateiformate möglich · maximal ${getPortalSettings().uploadMaxMB || 20} MB je Datei · Videos ohne Portal-Größenlimit</small></div>
       </div>` : ""}
 
       <div class="card public-card">
@@ -276,21 +278,13 @@ export async function renderPublicAreasModule(ctx) {
     };
   }
 
+  function isVideo(file){ return String(file?.type||"").toLowerCase().startsWith("video/") || /\.(mp4|mov|m4v|avi|wmv|webm|mkv|mpeg|mpg)$/i.test(file?.name||""); }
+  function duplicate(file){ return (state.items.files||[]).find(x=>String(x.name||"").toLocaleLowerCase("de-DE")===String(file.name||"").toLocaleLowerCase("de-DE")); }
+  async function directVideoUpload(file,overwrite){ const idToken=await token(); const prep=unwrap(await callPrepareLargeVideo({idToken,area:"public",parentId:state.folderId,fileName:file.name,contentType:file.type||"application/octet-stream",size:file.size,overwrite})); const response=await fetch(prep.uploadUrl,{method:"PUT",headers:{"Content-Type":file.type||"application/octet-stream"},body:file}); if(!response.ok)throw new Error(`Direktupload fehlgeschlagen (${response.status}).`); await callFinalizeLargeVideo({idToken,area:"public",parentId:state.folderId,fileId:prep.fileId,storagePath:prep.storagePath,name:prep.name,contentType:file.type||"application/octet-stream",size:file.size,oldStoragePath:prep.oldStoragePath||null}); }
   async function uploadFiles(fileList) {
-    const files = [...(fileList || [])]; if (!files.length) return;
-    let uploaded = 0;
-    for (const file of files) {
-      if (file.size > (getPortalSettings().uploadMaxMB || 20) * 1024 * 1024) { toast(`${file.name}: maximal ${getPortalSettings().uploadMaxMB || 20} MB je Datei.`); continue; }
-      showBusy(`„${file.name}“ wird hochgeladen …`);
-      try {
-        const idToken = await token();
-        const base64Data = await fileToBase64(file);
-        await callUpload({ idToken, parentId: state.folderId, fileName: file.name, contentType: file.type || "application/octet-stream", base64Data });
-        uploaded += 1;
-      } catch (err) { toast(`${file.name}: ${errorText(err, "Upload fehlgeschlagen.")}`); }
-    }
-    if (uploaded) toast(uploaded === 1 ? "Datei wurde hochgeladen." : `${uploaded} Dateien wurden hochgeladen.`);
-    await loadCurrent();
+    const files=[...(fileList||[])]; if(!files.length)return; let uploaded=0;
+    for(const file of files){ const existing=duplicate(file); let overwrite=false; if(existing){overwrite=confirm("Eine Datei mit identischen Namen existiert bereits. Möchten Sie diese überschreiben?");if(!overwrite)continue;} if(!isVideo(file)&&file.size>(getPortalSettings().uploadMaxMB||20)*1024*1024){toast(`${file.name}: maximal ${getPortalSettings().uploadMaxMB||20} MB je Datei.`);continue;} showBusy(`„${file.name}“ wird hochgeladen …`); try{ if(isVideo(file)&&file.size>(getPortalSettings().uploadMaxMB||20)*1024*1024)await directVideoUpload(file,overwrite); else {const idToken=await token();const base64Data=await fileToBase64(file);await callUpload({idToken,parentId:state.folderId,fileName:file.name,contentType:file.type||"application/octet-stream",base64Data,overwrite});} uploaded++;}catch(err){toast(`${file.name}: ${errorText(err,"Upload fehlgeschlagen.")}`);} }
+    if(uploaded)toast(uploaded===1?"Datei wurde hochgeladen.":`${uploaded} Dateien wurden hochgeladen.`); await loadCurrent();
   }
 
   async function openFile(fileId) {
@@ -306,8 +300,7 @@ export async function renderPublicAreasModule(ctx) {
 
   function openLink(id) {
     const item = state.items.links.find(x => x.id === id); if (!item?.url) return;
-    const w = window.open(item.url, "_blank", "noopener,noreferrer");
-    if (!w) window.location.href = item.url;
+    window.open(item.url, "_blank", "noopener,noreferrer");
   }
 
   async function deleteItem(kind, id) {
