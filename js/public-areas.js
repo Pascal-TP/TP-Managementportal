@@ -16,7 +16,9 @@ const state = {
   folderId: null,
   breadcrumbs: [],
   items: { folders: [], files: [], links: [] },
-  busy: false
+  busy: false,
+  viewMode: "list",
+  galleryUrls: new Map()
 };
 
 function token() {
@@ -61,6 +63,20 @@ function fileIcon(file) {
   return "DOC";
 }
 
+function isImageFile(file) {
+  const type = String(file?.contentType || "").toLowerCase();
+  const name = String(file?.name || "").toLowerCase();
+  return type.startsWith("image/") || /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(name);
+}
+
+function galleryStorageKey(folderId) { return `tp-managementportal-public-view:${folderId || "root"}`; }
+function loadViewMode(folderId) {
+  try { return localStorage.getItem(galleryStorageKey(folderId)) === "gallery" ? "gallery" : "list"; } catch { return "list"; }
+}
+function saveViewMode(folderId, mode) {
+  try { localStorage.setItem(galleryStorageKey(folderId), mode); } catch {}
+}
+
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -86,7 +102,13 @@ export async function renderPublicAreasModule(ctx) {
           ` : ""}
           <button class="btn secondary" id="public-refresh">↻ Aktualisieren</button>
         </div>
-        ${isAdmin ? '<span class="public-admin-pill">Bearbeitung: Admin</span>' : '<span class="public-read-pill">Nur Lesen</span>'}
+        <div class="public-toolbar-right">
+          <div class="public-view-toggle" aria-label="Ansicht wählen">
+            <button class="public-view-btn" id="public-view-list" type="button" title="Listenansicht">☷ Liste</button>
+            <button class="public-view-btn" id="public-view-gallery" type="button" title="Bildvorschau">▦ Vorschau</button>
+          </div>
+          ${isAdmin ? '<span class="public-admin-pill">Bearbeitung: Admin</span>' : '<span class="public-read-pill">Nur Lesen</span>'}
+        </div>
       </div>
 
       <div class="public-breadcrumbs" id="public-breadcrumbs"></div>
@@ -97,7 +119,7 @@ export async function renderPublicAreasModule(ctx) {
       </div>` : ""}
 
       <div class="card public-card">
-        <div class="public-list-head">
+        <div class="public-list-head" id="public-list-head">
           <div>Name</div><div>Geändert</div><div>Größe</div><div>Aktionen</div>
         </div>
         <div id="public-list" class="public-list"><div class="public-loading">Öffentlicher Bereich wird geladen …</div></div>
@@ -108,6 +130,10 @@ export async function renderPublicAreasModule(ctx) {
   const crumbs = content.querySelector("#public-breadcrumbs");
   const input = content.querySelector("#public-file-input");
   const drop = content.querySelector("#public-dropzone");
+  const listHead = content.querySelector("#public-list-head");
+  const viewListBtn = content.querySelector("#public-view-list");
+  const viewGalleryBtn = content.querySelector("#public-view-gallery");
+  state.viewMode = loadViewMode(state.folderId);
 
   const showBusy = (text = "Bitte warten …") => { list.innerHTML = `<div class="public-loading">${safeEsc(esc, text)}</div>`; };
 
@@ -120,6 +146,8 @@ export async function renderPublicAreasModule(ctx) {
       const data = unwrap(await callList({ idToken, parentId: state.folderId }));
       state.items = { folders: data.folders || [], files: data.files || [], links: data.links || [] };
       state.breadcrumbs = data.breadcrumbs || [];
+      state.viewMode = loadViewMode(state.folderId);
+      state.galleryUrls.clear();
       drawBreadcrumbs();
       draw();
     } catch (err) {
@@ -188,18 +216,89 @@ export async function renderPublicAreasModule(ctx) {
     </div>`;
   }
 
+  function setViewMode(mode) {
+    state.viewMode = mode === "gallery" ? "gallery" : "list";
+    saveViewMode(state.folderId, state.viewMode);
+    draw();
+  }
+
+  function updateViewButtons() {
+    viewListBtn?.classList.toggle("active", state.viewMode === "list");
+    viewGalleryBtn?.classList.toggle("active", state.viewMode === "gallery");
+  }
+
+  function galleryTile(file, index) {
+    return `<article class="public-gallery-tile" data-gallery-index="${index}">
+      <button class="public-gallery-image" data-gallery-open="${safeEsc(esc, file.id)}" aria-label="${safeEsc(esc, file.name)} öffnen">
+        <span class="public-gallery-placeholder">IMG</span>
+        <img data-gallery-thumb="${safeEsc(esc, file.id)}" alt="${safeEsc(esc, file.name)}" loading="lazy">
+      </button>
+      <div class="public-gallery-caption"><strong title="${safeEsc(esc, file.name)}">${safeEsc(esc, file.name)}</strong><small>${humanSize(file.size)}</small></div>
+      <div class="public-gallery-actions"><button class="btn secondary small" data-download-file="${safeEsc(esc, file.id)}">Herunterladen</button>${isAdmin ? `<button class="btn secondary small" data-edit-file="${safeEsc(esc, file.id)}">Umbenennen</button><button class="btn danger small" data-delete-file="${safeEsc(esc, file.id)}">Löschen</button>` : ""}</div>
+    </article>`;
+  }
+
+  async function galleryUrl(fileId) {
+    if (state.galleryUrls.has(fileId)) return state.galleryUrls.get(fileId);
+    const idToken = await token();
+    const data = unwrap(await callUrl({ idToken, fileId, mode: "inline" }));
+    if (!data.url) throw new Error("Keine Datei-URL erhalten.");
+    state.galleryUrls.set(fileId, data.url);
+    return data.url;
+  }
+
+  function loadGalleryThumbs() {
+    const images = [...list.querySelectorAll("img[data-gallery-thumb]")];
+    const loadOne = async img => {
+      if (img.dataset.loaded) return;
+      img.dataset.loaded = "1";
+      try { img.src = await galleryUrl(img.dataset.galleryThumb); img.onload = () => img.closest(".public-gallery-image")?.classList.add("loaded"); }
+      catch { img.closest(".public-gallery-image")?.classList.add("failed"); }
+    };
+    if (!("IntersectionObserver" in window)) { images.forEach(loadOne); return; }
+    const observer = new IntersectionObserver(entries => entries.forEach(entry => { if (entry.isIntersecting) { observer.unobserve(entry.target); loadOne(entry.target); } }), { rootMargin: "250px" });
+    images.forEach(img => observer.observe(img));
+  }
+
+  async function openGalleryLightbox(fileId) {
+    const images = (state.items.files || []).filter(isImageFile);
+    let index = images.findIndex(x => x.id === fileId); if (index < 0) return;
+    const overlay = document.createElement("div"); overlay.className = "public-lightbox";
+    overlay.innerHTML = `<button class="public-lightbox-close" type="button" aria-label="Schließen">×</button><button class="public-lightbox-nav prev" type="button" aria-label="Vorheriges Bild">‹</button><div class="public-lightbox-stage"><div class="public-lightbox-loading">Bild wird geladen …</div><img alt=""><div class="public-lightbox-caption"></div></div><button class="public-lightbox-nav next" type="button" aria-label="Nächstes Bild">›</button>`;
+    document.body.appendChild(overlay);
+    const img = overlay.querySelector("img"), caption = overlay.querySelector(".public-lightbox-caption"), loading = overlay.querySelector(".public-lightbox-loading");
+    const close = () => { document.removeEventListener("keydown", key); overlay.remove(); };
+    const show = async nextIndex => {
+      index = (nextIndex + images.length) % images.length; const file = images[index];
+      img.classList.remove("ready"); loading.hidden = false; caption.textContent = `${file.name} · ${index + 1} von ${images.length}`;
+      try { img.src = await galleryUrl(file.id); img.alt = file.name || "Bild"; img.onload = () => { loading.hidden = true; img.classList.add("ready"); }; }
+      catch (err) { loading.textContent = errorText(err, "Bild konnte nicht geladen werden."); }
+    };
+    const key = e => { if (e.key === "Escape") close(); if (e.key === "ArrowLeft") show(index - 1); if (e.key === "ArrowRight") show(index + 1); };
+    overlay.querySelector(".public-lightbox-close").onclick = close; overlay.querySelector(".prev").onclick = () => show(index - 1); overlay.querySelector(".next").onclick = () => show(index + 1); overlay.onclick = e => { if (e.target === overlay) close(); }; document.addEventListener("keydown", key); await show(index);
+  }
+
   function draw() {
-    const rows = [
-      ...(state.items.folders || []).map(folderRow),
-      ...(state.items.files || []).map(fileRow),
-      ...(state.items.links || []).map(linkRow)
-    ];
+    updateViewButtons();
+    if (state.viewMode === "gallery") {
+      const images = (state.items.files || []).filter(isImageFile);
+      const otherFiles = (state.items.files || []).filter(x => !isImageFile(x));
+      listHead.hidden = true;
+      const gallery = images.length ? `<div class="public-gallery"><div class="public-gallery-info"><strong>${images.length} ${images.length === 1 ? "Bild" : "Bilder"}</strong><span>Klicken zum Vergrößern · mit ← → durchblättern</span></div><div class="public-gallery-grid">${images.map(galleryTile).join("")}</div></div>` : "";
+      const others = [...(state.items.folders || []).map(folderRow), ...otherFiles.map(fileRow), ...(state.items.links || []).map(linkRow)];
+      const otherBlock = others.length ? `<div class="public-gallery-other"><div class="public-gallery-section-title">Weitere Inhalte</div>${others.join("")}</div>` : "";
+      list.innerHTML = gallery || otherBlock ? gallery + otherBlock : `<div class="public-empty"><span>▱</span><strong>Dieser Ordner ist leer</strong><small>${isAdmin ? "Legen Sie einen Unterordner, eine Datei oder einen Link an." : "Hier wurden noch keine Inhalte bereitgestellt."}</small></div>`;
+      bindRows(); loadGalleryThumbs(); return;
+    }
+    listHead.hidden = false;
+    const rows = [...(state.items.folders || []).map(folderRow), ...(state.items.files || []).map(fileRow), ...(state.items.links || []).map(linkRow)];
     list.innerHTML = rows.length ? rows.join("") : `<div class="public-empty"><span>▱</span><strong>Dieser Ordner ist leer</strong><small>${isAdmin ? "Legen Sie einen Unterordner, eine Datei oder einen Link an." : "Hier wurden noch keine Inhalte bereitgestellt."}</small></div>`;
     bindRows();
   }
 
   function bindRows() {
     list.querySelectorAll("[data-open-folder]").forEach(btn => btn.onclick = () => { state.folderId = btn.dataset.openFolder; loadCurrent(); });
+    list.querySelectorAll("[data-gallery-open]").forEach(btn => btn.onclick = e => { e.stopPropagation(); openGalleryLightbox(btn.dataset.galleryOpen); });
     list.querySelectorAll("[data-open-file]").forEach(btn => btn.onclick = e => { e.stopPropagation(); openFile(btn.dataset.openFile); });
     list.querySelectorAll("[data-download-file]").forEach(btn => btn.onclick = e => { e.stopPropagation(); downloadFile(btn.dataset.downloadFile); });
     list.querySelectorAll("[data-open-link]").forEach(btn => btn.onclick = () => openLink(btn.dataset.openLink));
@@ -341,6 +440,8 @@ export async function renderPublicAreasModule(ctx) {
   }
 
   content.querySelector("#public-refresh").onclick = loadCurrent;
+  viewListBtn.onclick = () => setViewMode("list");
+  viewGalleryBtn.onclick = () => setViewMode("gallery");
   if (isAdmin) {
     content.querySelector("#public-new-folder").onclick = createFolderDialog;
     content.querySelector("#public-new-link").onclick = () => linkDialog();
