@@ -85,6 +85,7 @@ const fullNav = [
 const employeeNav = [
   ["dashboard", "▦", "Dashboard"],
   ["documents", "▤", "Dokumentenregister"],
+  ["deadlines", "◷", "Fristen & Wiedervorlagen"],
   ["areas", "▣", "Öffentliche Bereiche"],
   ["shared", "♧", "Für mich freigegeben"],
 ];
@@ -92,6 +93,7 @@ const employeeEditorNav = [
   ["dashboard", "▦", "Dashboard"],
   ["documents", "▤", "Dokumentenregister"],
   ["workflow", "✓", "Freigaben & Aufgaben"],
+  ["deadlines", "◷", "Fristen & Wiedervorlagen"],
   ["areas", "▣", "Öffentliche Bereiche"],
   ["myfiles", "▱", "Meine Dateien"],
   ["shared", "♧", "Für mich freigegeben"],
@@ -216,9 +218,9 @@ function render(page) {
   current = page;
   initNav();
   const views = portalView === "employee"
-    ? { dashboard: renderEmployeeDashboard, documents: renderEmployeeDocuments, areas: renderAreas, myfiles: renderMyFiles, shared: renderShared }
+    ? { dashboard: renderEmployeeDashboard, documents: renderEmployeeDocuments, deadlines: renderDeadlines, areas: renderAreas, myfiles: renderMyFiles, shared: renderShared }
     : portalView === "employee-editor"
-      ? { dashboard: renderDashboard, documents: renderDocuments, workflow: renderWorkflow, areas: renderAreas, myfiles: renderMyFiles, shared: renderShared, archive: renderArchive }
+      ? { dashboard: renderDashboard, documents: renderDocuments, workflow: renderWorkflow, deadlines: renderDeadlines, areas: renderAreas, myfiles: renderMyFiles, shared: renderShared, archive: renderArchive }
       : { dashboard: renderDashboard, documents: renderDocuments, workflow: renderWorkflow, deadlines: renderDeadlines, areas: renderAreas, companies: renderCompanies, archive: renderArchive, history: renderHistory, myfiles: renderMyFiles, shared: renderShared, settings: renderSettings };
   (views[page] || views.dashboard)();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -236,6 +238,27 @@ function taskRow(task, own = false) {
   const number = d ? displayDocNo(d) : task.documentId;
   return `<div class="task workflow-task"><div class="task-icon">✓</div><div><strong>${esc(number)}${number !== "–" ? " · " : ""}${esc(task.documentTitle)}</strong><span>${esc(task.documentType)} · ${isQmTask ? "QM-Endprüfung" : "Aufgabe"} für ${esc(task.assignee)}</span></div>${action}</div>`;
 }
+function visibleDeadlineDocuments() {
+  const actor = { ...currentProfile, uid: currentUser?.uid };
+  const source = portalView === "employee" ? employeeDocs() : getVisibleDocumentsForUser(actor).filter(d => !d.archived);
+  return source.filter(d => d.review && d.review !== "–").sort((a,b) => String(a.review).localeCompare(String(b.review)));
+}
+function deadlineInfo(d) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const due = new Date(String(d.review) + "T00:00:00");
+  if (Number.isNaN(due.getTime())) return { kind:"future", label:"", days:99999 };
+  const days = Math.round((due - today) / 86400000);
+  if (days < 0) return { kind:"overdue", label:"Überfällig", days };
+  if (days === 0) return { kind:"today", label:"Heute fällig", days };
+  if (days <= 30) return { kind:"soon", label:`In ${days} Tag${days === 1 ? "" : "en"}`, days };
+  return { kind:"future", label:"", days };
+}
+function dueDeadlineDocuments() { return visibleDeadlineDocuments().filter(d => deadlineInfo(d).days <= 30); }
+function deadlineKpiHtml() {
+  const due = dueDeadlineDocuments(), overdue = due.filter(d => deadlineInfo(d).kind === "overdue").length, today = due.filter(d => deadlineInfo(d).kind === "today").length;
+  return `<button class="kpi kpi-button ${overdue ? "bad" : due.length ? "warn" : ""}" type="button" onclick="render('deadlines')"><span>Fällige Dokumente</span><strong>${due.length}</strong><small>${overdue ? `${overdue} überfällig` : today ? `${today} heute fällig` : due.length ? "innerhalb der nächsten 30 Tage" : "keine in den nächsten 30 Tagen"}</small></button>`;
+}
+
 function renderDashboard() {
   setHead("Dashboard", "Zentrale Übersicht des integrierten Managementsystems.");
   const actor = { ...currentProfile, uid: currentUser?.uid };
@@ -247,7 +270,7 @@ function renderDashboard() {
   const recent = docs.slice(0, 5);
   const feedback = rejected.length ? `<div class="card rejection-card"><div class="card-head"><div><h2>Zur Überarbeitung zurückgegeben</h2><p>Diese Dokumente wurden abgelehnt. Der Ablehnungsgrund ist hinterlegt; anschließend können neue Dateien hochgeladen und der Workflow neu gestartet werden.</p></div></div><div class="task-list">${rejected.map(t => `<div class="task workflow-task"><div class="task-icon">!</div><div><strong>${esc(displayDocNo(getDocument(t.documentId)))}${displayDocNo(getDocument(t.documentId)) !== "–" ? " · " : ""}${esc(t.documentTitle)}</strong><span>${t.decisionNote ? `Grund: ${esc(t.decisionNote)}` : "Dokument wurde zur Überarbeitung zurückgegeben."}</span></div><button class="btn small" onclick="openRevisionDoc('${t.documentId}')">Überarbeiten</button></div>`).join("")}</div></div>` : "";
   content.innerHTML = `
-    <div class="kpi-grid"><button class="kpi kpi-button" type="button" onclick="render('documents')"><span>Freigegebene Dokumente</span><strong>${approved}</strong><small>aktuell veröffentlicht</small></button><button class="kpi kpi-button warn" type="button" onclick="render('workflow')"><span>Offene Workflows</span><strong>${openAll}</strong><small>${myTasks.length} Aufgabe(n) für Sie</small></button><button class="kpi kpi-button" type="button" onclick="render('documents')"><span>Dokumente gesamt</span><strong>${docs.length}</strong><small>ohne Archiv</small></button><button class="kpi kpi-button" type="button" onclick="render('companies')"><span>Unternehmen</span><strong>${companies.length-1}</strong><small>zentral verwalten</small></button></div>
+    <div class="kpi-grid"><button class="kpi kpi-button" type="button" onclick="render('documents')"><span>Freigegebene Dokumente</span><strong>${approved}</strong><small>aktuell veröffentlicht</small></button><button class="kpi kpi-button warn" type="button" onclick="render('workflow')"><span>Offene Workflows</span><strong>${openAll}</strong><small>${myTasks.length} Aufgabe(n) für Sie</small></button><button class="kpi kpi-button" type="button" onclick="render('documents')"><span>Dokumente gesamt</span><strong>${docs.length}</strong><small>ohne Archiv</small></button>${deadlineKpiHtml()}</div>
     ${feedback}
     <div class="two-col"><div class="card"><div class="card-head"><div><h2>Meine offenen Aufgaben</h2><p>Freigaben, die Ihnen persönlich zugewiesen wurden.</p></div><button class="btn secondary small" onclick="render('workflow')">Alle Aufgaben</button></div>${myTasks.length ? `<div class="task-list">${myTasks.map(t => taskRow(t, true)).join("")}</div>` : emptyState("Keine offenen Aufgaben", "Aktuell ist Ihnen kein Freigabeworkflow zugewiesen.")}</div>
     <div class="card"><div class="card-head"><div><h2>Dokumentenlenkung</h2><p>Neue Dokumente direkt hochladen und bei Bedarf einen Freigabeworkflow starten.</p></div></div><div class="quick-create"><strong>Neues Dokument einstellen</strong><p>Arbeits-, Verfahrens- und Betriebsanweisungen, Formulare/Vorlagen und Monatsberichte benötigen zwingend eine Freigabe. Dokumentnummer und Version werden bei diesen Dokumentarten durch QM vergeben.</p><button class="btn" onclick="openNewDoc()">+ Neues Dokument</button></div></div></div>
@@ -263,7 +286,7 @@ function renderEmployeeDashboard() {
   setHead("Dashboard", "Aktuelle Informationen und freigegebene Dokumente für Beschäftigte.");
   const rows = employeeDocs();
   const recent = rows.slice(0, 5);
-  content.innerHTML = `<div class="employee-welcome"><div><span class="employee-eyebrow">Mitarbeiterportal</span><h2>Alles Wichtige an einer Stelle</h2><p>Hier stehen die freigegebenen Unternehmensdokumente zur Verfügung. Neue oder geänderte Inhalte werden nach ihrer Freigabe automatisch sichtbar.</p></div><button class="btn" onclick="render('documents')">Zum Dokumentenregister</button></div><div class="kpi-grid employee-kpis"><div class="kpi"><span>Freigegebene Dokumente</span><strong>${rows.length}</strong><small>für Ihre Ansicht verfügbar</small></div><div class="kpi"><span>Unternehmen</span><strong>${companies.length-1}</strong><small>zentral filterbar</small></div><div class="kpi"><span>Öffentliche Bereiche</span><strong>9</strong><small>Informationen & Vorlagen</small></div><div class="kpi"><span>Persönlicher Bereich</span><strong>1</strong><small>Meine Dateien</small></div></div><div class="card"><div class="card-head"><div><h2>Aktuelle Dokumente</h2><p>Zuletzt freigegebene Inhalte.</p></div><button class="btn secondary" onclick="render('documents')">Alle Dokumente</button></div>${employeeDocTable(recent)}</div>`;
+  content.innerHTML = `<div class="employee-welcome"><div><span class="employee-eyebrow">Mitarbeiterportal</span><h2>Alles Wichtige an einer Stelle</h2><p>Hier stehen die freigegebenen Unternehmensdokumente zur Verfügung. Neue oder geänderte Inhalte werden nach ihrer Freigabe automatisch sichtbar.</p></div><button class="btn" onclick="render('documents')">Zum Dokumentenregister</button></div><div class="kpi-grid employee-kpis"><div class="kpi"><span>Freigegebene Dokumente</span><strong>${rows.length}</strong><small>für Ihre Ansicht verfügbar</small></div><div class="kpi"><span>Unternehmen</span><strong>${companies.length-1}</strong><small>zentral filterbar</small></div><div class="kpi"><span>Öffentliche Bereiche</span><strong>9</strong><small>Informationen & Vorlagen</small></div>${deadlineKpiHtml()}</div><div class="card"><div class="card-head"><div><h2>Aktuelle Dokumente</h2><p>Zuletzt freigegebene Inhalte.</p></div><button class="btn secondary" onclick="render('documents')">Alle Dokumente</button></div>${employeeDocTable(recent)}</div>`;
 }
 function renderEmployeeDocuments() {
   setHead("Dokumentenregister", "Freigegebene Unternehmensdokumente zentral abrufen.");
@@ -308,8 +331,14 @@ function renderWorkflow() {
 }
 function renderDeadlines() {
   setHead("Fristen & Wiedervorlagen", "Befristungen und regelmäßige Prüfungen im Blick behalten.");
-  const docs = getVisibleDocumentsForUser({ ...currentProfile, uid: currentUser?.uid }).filter(d => !d.archived && d.review && d.review !== "–").sort((a,b) => String(a.review).localeCompare(String(b.review)));
-  content.innerHTML = `<div class="info-strip">Neben Dokumenten sollen hier später auch <strong>befristete Bescheide, Steuerbefreiungen, Zertifikate, Verträge oder Genehmigungen</strong> mit automatischen Erinnerungen überwacht werden.</div><div class="card"><div class="card-head"><div><h2>Aktive Wiedervorlagen</h2><p>Aus den bereits eingestellten Dokumenten.</p></div></div>${docs.length ? `<div class="task-list">${docs.map(d => `<div class="task"><div class="task-icon">◷</div><div><strong>${esc(displayDocNo(d))}${displayDocNo(d) !== "–" ? " · " : ""}${esc(d.title)}</strong><span>${esc(d.company)} · ${esc(d.area)}</span></div><div class="deadline">${fmtDate(d.review)}</div></div>`).join("")}</div>` : emptyState("Noch keine Wiedervorlagen", "Eine Wiedervorlage entsteht, sobald beim Dokument ein Prüfdatum eingetragen wird.")}</div>`;
+  const docs = visibleDeadlineDocuments();
+  const due = docs.filter(d => deadlineInfo(d).days <= 30);
+  const later = docs.filter(d => deadlineInfo(d).days > 30);
+  const overdue = due.filter(d => deadlineInfo(d).kind === "overdue").length;
+  const todayCount = due.filter(d => deadlineInfo(d).kind === "today").length;
+  const soon = due.filter(d => deadlineInfo(d).kind === "soon").length;
+  const row = d => { const info=deadlineInfo(d); const cls=info.kind === "overdue" ? "bad" : (info.kind === "today" || info.kind === "soon") ? "warn" : ""; return `<div class="task deadline-task ${info.kind}"><div class="task-icon">◷</div><div><strong>${esc(displayDocNo(d))}${displayDocNo(d) !== "–" ? " · " : ""}${esc(d.title)}</strong><span>${esc(d.company)} · ${esc(d.area)}${info.label ? ` · <b>${esc(info.label)}</b>` : ""}</span></div><div class="deadline ${cls}">${fmtDate(d.review)}</div></div>`; };
+  content.innerHTML = `<div class="kpi-grid deadline-kpis"><div class="kpi ${overdue ? "bad" : ""}"><span>Überfällig</span><strong>${overdue}</strong><small>Frist bereits überschritten</small></div><div class="kpi ${todayCount ? "warn" : ""}"><span>Heute fällig</span><strong>${todayCount}</strong><small>heutige Wiedervorlagen</small></div><div class="kpi ${soon ? "warn" : ""}"><span>Demnächst fällig</span><strong>${soon}</strong><small>innerhalb von 30 Tagen</small></div><div class="kpi"><span>Weitere Wiedervorlagen</span><strong>${later.length}</strong><small>später als 30 Tage</small></div></div><div class="card"><div class="card-head"><div><h2>Jetzt zu beachten</h2><p>Überfällige, heute fällige und innerhalb der nächsten 30 Tage anstehende Dokumente.</p></div></div>${due.length ? `<div class="task-list">${due.map(row).join("")}</div>` : emptyState("Aktuell nichts fällig", "In den nächsten 30 Tagen steht für Ihren sichtbaren Dokumentenbereich keine Wiedervorlage an.")}</div><div class="card"><div class="card-head"><div><h2>Spätere Wiedervorlagen</h2><p>Alle weiteren Fristen in Ihrem sichtbaren Dokumentenbereich.</p></div></div>${later.length ? `<div class="task-list">${later.map(row).join("")}</div>` : emptyState("Keine weiteren Wiedervorlagen", "Es sind keine späteren Fristen hinterlegt.")}</div>`;
 }
 
 function renderAreas() {

@@ -45,7 +45,7 @@ function humanSize(bytes = 0) {
 function isPreviewable(file) {
   const type = String(file?.contentType || "").toLowerCase();
   const name = String(file?.name || "").toLowerCase();
-  return type === "application/pdf" || name.endsWith(".pdf") || type.startsWith("image/") || type.startsWith("text/");
+  return type === "application/pdf" || name.endsWith(".pdf") || type.startsWith("image/") || type.startsWith("text/") || type.startsWith("video/") || /\.(mp4|webm|ogg|mov|m4v)$/i.test(name);
 }
 
 function fileIcon(file) {
@@ -168,6 +168,7 @@ export async function renderPublicAreasModule(ctx) {
       <div>${fmtDateTime(file.updatedAt || file.createdAt)}</div><div>${humanSize(file.size)}</div>
       <div class="public-actions">
         <button class="btn small" data-open-file="${safeEsc(esc, file.id)}">${primary}</button>
+        <button class="btn secondary small" data-download-file="${safeEsc(esc, file.id)}">Herunterladen</button>
         ${isAdmin ? `<button class="btn secondary small" data-edit-file="${safeEsc(esc, file.id)}">Umbenennen</button><button class="btn danger small" data-delete-file="${safeEsc(esc, file.id)}">Löschen</button>` : ""}
       </div>
     </div>`;
@@ -199,7 +200,8 @@ export async function renderPublicAreasModule(ctx) {
 
   function bindRows() {
     list.querySelectorAll("[data-open-folder]").forEach(btn => btn.onclick = () => { state.folderId = btn.dataset.openFolder; loadCurrent(); });
-    list.querySelectorAll("[data-open-file]").forEach(btn => btn.onclick = () => openFile(btn.dataset.openFile));
+    list.querySelectorAll("[data-open-file]").forEach(btn => btn.onclick = e => { e.stopPropagation(); openFile(btn.dataset.openFile); });
+    list.querySelectorAll("[data-download-file]").forEach(btn => btn.onclick = e => { e.stopPropagation(); downloadFile(btn.dataset.downloadFile); });
     list.querySelectorAll("[data-open-link]").forEach(btn => btn.onclick = () => openLink(btn.dataset.openLink));
     if (!isAdmin) return;
     list.querySelectorAll("[data-edit-folder]").forEach(btn => btn.onclick = () => editFolderDialog(btn.dataset.editFolder));
@@ -289,13 +291,35 @@ export async function renderPublicAreasModule(ctx) {
 
   async function openFile(fileId) {
     const file = state.items.files.find(x => x.id === fileId); if (!file) return;
+    const previewWindow = window.open("about:blank", "_blank");
+    if (previewWindow) { previewWindow.opener = null; previewWindow.document.title = "Datei wird geöffnet …"; }
     try {
       const idToken = await token();
-      const data = unwrap(await callUrl({ idToken, fileId, mode: isPreviewable(file) ? "inline" : "attachment" }));
+      const preview = isPreviewable(file);
+      const data = unwrap(await callUrl({ idToken, fileId, mode: preview ? "inline" : "attachment" }));
       if (!data.url) throw new Error("Keine Datei-URL erhalten.");
-      const w = window.open(data.url, "_blank", "noopener,noreferrer");
-      if (!w) window.location.href = data.url;
-    } catch (err) { toast(errorText(err, "Datei konnte nicht geöffnet werden.")); }
+      if (previewWindow) previewWindow.location.replace(data.url);
+      else window.location.href = data.url;
+    } catch (err) {
+      if (previewWindow) previewWindow.close();
+      toast(errorText(err, "Datei konnte nicht geöffnet werden."));
+    }
+  }
+
+  async function downloadFile(fileId) {
+    const file = state.items.files.find(x => x.id === fileId); if (!file) return;
+    try {
+      const idToken = await token();
+      const data = unwrap(await callUrl({ idToken, fileId, mode: "attachment" }));
+      if (!data.url) throw new Error("Keine Datei-URL erhalten.");
+      const a = document.createElement("a");
+      a.href = data.url;
+      a.download = file.name || "Datei";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) { toast(errorText(err, "Datei konnte nicht heruntergeladen werden.")); }
   }
 
   function openLink(id) {
