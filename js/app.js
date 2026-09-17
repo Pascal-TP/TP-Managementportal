@@ -55,6 +55,7 @@ import {
   refreshWorkflows
 } from "./workflows.js";
 import { renderMyFilesModule } from "./my-files.js";
+import { renderSharedFilesModule } from "./shared-files.js";
 import { renderPublicAreasModule } from "./public-areas.js";
 import { loadArchive, restoreArchiveItem, permanentlyDeleteArchiveItem, getArchiveFileUrl } from "./archive.js";
 import { loadHistory } from "./history.js";
@@ -85,7 +86,6 @@ const fullNav = [
 const employeeNav = [
   ["dashboard", "▦", "Dashboard"],
   ["documents", "▤", "Dokumentenregister"],
-  ["deadlines", "◷", "Fristen & Wiedervorlagen"],
   ["areas", "▣", "Öffentliche Bereiche"],
   ["shared", "♧", "Für mich freigegeben"],
 ];
@@ -286,7 +286,7 @@ function renderEmployeeDashboard() {
   setHead("Dashboard", "Aktuelle Informationen und freigegebene Dokumente für Beschäftigte.");
   const rows = employeeDocs();
   const recent = rows.slice(0, 5);
-  content.innerHTML = `<div class="employee-welcome"><div><span class="employee-eyebrow">Mitarbeiterportal</span><h2>Alles Wichtige an einer Stelle</h2><p>Hier stehen die freigegebenen Unternehmensdokumente zur Verfügung. Neue oder geänderte Inhalte werden nach ihrer Freigabe automatisch sichtbar.</p></div><button class="btn" onclick="render('documents')">Zum Dokumentenregister</button></div><div class="kpi-grid employee-kpis"><div class="kpi"><span>Freigegebene Dokumente</span><strong>${rows.length}</strong><small>für Ihre Ansicht verfügbar</small></div><div class="kpi"><span>Unternehmen</span><strong>${companies.length-1}</strong><small>zentral filterbar</small></div><div class="kpi"><span>Öffentliche Bereiche</span><strong>9</strong><small>Informationen & Vorlagen</small></div>${deadlineKpiHtml()}</div><div class="card"><div class="card-head"><div><h2>Aktuelle Dokumente</h2><p>Zuletzt freigegebene Inhalte.</p></div><button class="btn secondary" onclick="render('documents')">Alle Dokumente</button></div>${employeeDocTable(recent)}</div>`;
+  content.innerHTML = `<div class="employee-welcome"><div><span class="employee-eyebrow">Mitarbeiterportal</span><h2>Alles Wichtige an einer Stelle</h2><p>Hier stehen die für Sie freigegebenen Unternehmensdokumente zur Verfügung. Neue Inhalte werden nach ihrer Freigabe automatisch sichtbar.</p></div><button class="btn" onclick="render('documents')">Zum Dokumentenregister</button></div><div class="card"><div class="card-head"><div><h2>Aktuelle Dokumente</h2><p>Die fünf zuletzt eingestellten, für Sie freigegebenen Dokumente. Die Liste bleibt sichtbar und wird automatisch durch neuere Dokumente aktualisiert.</p></div><button class="btn secondary" onclick="render('documents')">Alle Dokumente</button></div>${employeeDocTable(recent)}</div>`;
 }
 function renderEmployeeDocuments() {
   setHead("Dokumentenregister", "Freigegebene Unternehmensdokumente zentral abrufen.");
@@ -363,13 +363,14 @@ function renderMyFiles() {
     esc,
     toast,
     profile: currentProfile,
-    user: currentUser
+    user: currentUser,
+    colleagues
   });
 }
 
 function renderShared() {
-  setHead("Für mich freigegeben", "Ordner und Dateien, die gezielt mit Ihnen geteilt wurden.");
-  content.innerHTML = `<div class="info-strip">Freigaben sollen für einzelne Personen vergeben werden. Unterordner übernehmen standardmäßig die Berechtigung des übergeordneten Ordners.</div><div class="card">${emptyState("Noch keine Freigaben", "Personenbezogene Ordnerfreigaben werden in einem späteren Dateiverwaltungsmodul angebunden.")}</div>`;
+  setHead("Für mich freigegeben", "Ordner, die andere Portalnutzer für Sie freigegeben haben.");
+  renderSharedFilesModule({ content, esc, toast, profile: currentProfile, user: currentUser });
 }
 function renderCompanies() {
   setHead("Unternehmen", "Dokumente für den gesamten Unternehmensverbund strukturieren.");

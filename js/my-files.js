@@ -12,6 +12,7 @@ const callFavorite = httpsCallable(cloudFunctions, "setManagementPortalPrivateFa
 const callDeadline = httpsCallable(cloudFunctions, "setManagementPortalPrivateFileDeadline");
 const callPrepareLargeVideo = httpsCallable(cloudFunctions, "prepareManagementPortalLargeVideoUpload");
 const callFinalizeLargeVideo = httpsCallable(cloudFunctions, "finalizeManagementPortalLargeVideoUpload");
+const callShareFolder = httpsCallable(cloudFunctions, "setManagementPortalPrivateFolderShare");
 
 const state = {
   folderId: null,
@@ -74,7 +75,7 @@ function humanSize(bytes = 0) {
 function safeEsc(esc, value) { return esc ? esc(value) : String(value ?? ""); }
 
 export async function renderMyFilesModule(ctx) {
-  const { content, modal, modalContent, esc, toast, profile } = ctx;
+  const { content, modal, modalContent, esc, toast, profile, colleagues = [] } = ctx;
   if (!profile || (profile.role === "employee" && profile.managementPortalDocumentAccess !== true)) {
     content.innerHTML = `<div class="card"><div class="empty-state"><strong>Kein Zugriff</strong><p>Für diesen Benutzer ist der persönliche Dateibereich nicht freigeschaltet.</p></div></div>`;
     return;
@@ -253,6 +254,7 @@ export async function renderMyFilesModule(ctx) {
       <div>${fmtDateTime(folder.updatedAt || folder.createdAt)}</div><div>–</div>
       <div class="myfiles-actions">
         <button class="icon-btn" data-favorite-folder="${safeEsc(esc, folder.id)}" title="Favorit">${folder.favorite ? "★" : "☆"}</button>
+        <button class="btn secondary small" data-share-folder="${safeEsc(esc, folder.id)}">Freigeben</button>
         <button class="btn secondary small" data-rename-folder="${safeEsc(esc, folder.id)}">Umbenennen</button>
         <button class="btn danger small" data-delete-folder="${safeEsc(esc, folder.id)}">Löschen</button>
       </div></div>`;
@@ -289,6 +291,7 @@ export async function renderMyFilesModule(ctx) {
   function bindRows() {
     list.querySelectorAll("[data-open-folder]").forEach(btn => btn.onclick = () => { state.folderId = btn.dataset.openFolder; state.favoritesOnly = false; loadCurrent(); });
     list.querySelectorAll("[data-open-file]").forEach(btn => btn.onclick = () => openFile(btn.dataset.openFile));
+    list.querySelectorAll("[data-share-folder]").forEach(btn => btn.onclick = () => shareFolderDialog(btn.dataset.shareFolder));
     list.querySelectorAll("[data-rename-folder]").forEach(btn => btn.onclick = () => renameItem("folder", btn.dataset.renameFolder));
     list.querySelectorAll("[data-rename-file]").forEach(btn => btn.onclick = () => renameItem("file", btn.dataset.renameFile));
     list.querySelectorAll("[data-deadline-file]").forEach(btn => btn.onclick = () => deadlineDialog(btn.dataset.deadlineFile));
@@ -359,6 +362,20 @@ export async function renderMyFilesModule(ctx) {
       const w = window.open(data.url, "_blank", "noopener,noreferrer");
       if (!w) window.location.href = data.url;
     } catch (err) { toast(errorText(err, "Datei konnte nicht geöffnet werden.")); }
+  }
+
+
+  async function shareFolderDialog(id) {
+    const folder = state.items.folders.find(x => x.id === id);
+    if (!folder) return;
+    const selected = new Set((folder.sharedWithUserIds || []).map(String));
+    const people = colleagues.filter(c => String(c.id) !== String(auth.currentUser?.uid || ""));
+    modalContent.innerHTML = `<form id="myfiles-share-form" class="modal-box"><div class="modal-head"><div><h2>Ordner freigeben</h2><p>„${safeEsc(esc, folder.name)}“ und alle enthaltenen Unterordner und Dateien werden schreibgeschützt freigegeben.</p></div><button class="close-btn" type="button">×</button></div><div class="visibility-options"><label class="visibility-radio"><input type="radio" name="share-mode" value="all" ${folder.shareAll===true?'checked':''}><span><strong>Alle Portalnutzer</strong><small>Jeder Benutzer mit Zugang zum Managementportal kann den Ordner öffnen.</small></span></label><label class="visibility-radio"><input type="radio" name="share-mode" value="selected" ${folder.shareAll===true?'':'checked'}><span><strong>Ausgewählte Mitarbeiter</strong><small>Mehrere Mitarbeiter können gleichzeitig ausgewählt werden.</small></span></label></div><div id="share-people" class="visibility-people ${folder.shareAll===true?'hidden':''}"><div class="visibility-person-list">${people.map(c=>`<label class="visibility-person"><input type="checkbox" class="share-person" value="${safeEsc(esc,c.id)}" ${selected.has(String(c.id))?'checked':''}><span><strong>${safeEsc(esc,c.name)}</strong><small>${safeEsc(esc,c.email||'')}</small></span></label>`).join('') || '<div class="visibility-empty">Keine weiteren Portalnutzer gefunden.</div>'}</div></div><div class="modal-footer"><button type="button" class="btn secondary" id="share-cancel">Abbrechen</button><button type="submit" class="btn">Freigabe speichern</button></div></form>`;
+    modal.showModal();
+    const close=()=>modal.close();
+    modalContent.querySelector('.close-btn').onclick=close; modalContent.querySelector('#share-cancel').onclick=close;
+    modalContent.querySelectorAll('input[name="share-mode"]').forEach(r=>r.onchange=()=>modalContent.querySelector('#share-people').classList.toggle('hidden',r.value==='all'&&r.checked));
+    modalContent.querySelector('#myfiles-share-form').onsubmit=async e=>{e.preventDefault(); const mode=modalContent.querySelector('input[name="share-mode"]:checked')?.value||'selected'; const ids=[...modalContent.querySelectorAll('.share-person:checked')].map(x=>x.value); try{const idToken=await token(); await callShareFolder({idToken,folderId:id,shareAll:mode==='all',userIds:mode==='all'?[]:ids}); toast(mode==='all'||ids.length?'Freigabe wurde gespeichert.':'Freigabe wurde aufgehoben.'); close(); await loadCurrent();}catch(err){toast(errorText(err,'Freigabe konnte nicht gespeichert werden.'));}};
   }
 
   async function renameItem(kind, id) {
