@@ -32,10 +32,20 @@ export function generateTemporaryDocumentId(){return `ENTW-${Date.now()}-${Math.
 export function getDisplayDocumentNumber(d){if(!d)return"–";return d.numberAssigned===false||String(d.id||"").startsWith("ENTW-")?"–":d.id||"–";}
 function isPdf(f){return Boolean(f&&(f.type==="application/pdf"||/\.pdf$/i.test(f.name||"")));}
 
-export async function createDocument(payload, sourceFile, pdfFile=null) {
-  if(!sourceFile)throw new Error("Bitte die Originaldatei auswählen oder hineinziehen.");
-  const reading=isPdf(sourceFile)?sourceFile:pdfFile; if(!reading||!isPdf(reading))throw new Error("Bitte zusätzlich eine PDF-Lesefassung hochladen.");
-  const r=await portalCall("createManagementPortalDocument",{payload,source:await uploadPayload(sourceFile),pdf:await uploadPayload(reading)}); return replaceCache(r.document);
+export async function createDocument(payload, sourceFile=null, pdfFile=null) {
+  // Ohne Workflow darf nach ausdrücklicher Bestätigung auch nur eine Datei
+  // (z. B. ausschließlich eine PDF-Lesefassung) gespeichert werden.
+  // Die Pflichtprüfung für Original + PDF erfolgt bei Workflow bereits in app.js
+  // und zusätzlich serverseitig in createManagementPortalDocument.
+  if(!sourceFile && !pdfFile) throw new Error("Bitte mindestens eine Dokumentdatei auswählen.");
+  if(pdfFile && !isPdf(pdfFile)) throw new Error("Die PDF-Lesefassung muss eine PDF-Datei sein.");
+  const reading = pdfFile || (isPdf(sourceFile) ? sourceFile : null);
+  const r=await portalCall("createManagementPortalDocument",{
+    payload,
+    source: sourceFile ? await uploadPayload(sourceFile) : null,
+    pdf: reading ? await uploadPayload(reading) : null
+  });
+  return replaceCache(r.document);
 }
 async function action(action,id,data={}) { const r=await portalCall("updateManagementPortalDocument",{action,documentId:id,...data}); if(r.document)return replaceCache(r.document,r.oldId||""); return null; }
 export function updateDocumentMetadata(id,patch,by=""){return action("metadata",id,{patch,by});}
