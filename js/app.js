@@ -1,3 +1,4 @@
+import { portalConfirm } from "./ui-feedback.js";
 import {
   login,
   logout,
@@ -525,7 +526,7 @@ async function submitNewDocument(e) {
   if (workflowEnabled && (!pendingUploadFile || !pendingPdfFile)) return toast("Bei einem Workflow sind Originaldatei und PDF-Lesefassung erforderlich.");
   if (!workflowEnabled && (!pendingUploadFile || !pendingPdfFile)) {
     const missing = !pendingUploadFile && !pendingPdfFile ? "Originaldatei und PDF-Lesefassung fehlen." : !pendingUploadFile ? "Die Originaldatei fehlt." : "Die PDF-Lesefassung fehlt.";
-    if (!confirm(`${missing} Möchten Sie das Dokument dennoch anlegen?`)) return;
+    if (!await portalConfirm(`${missing} Möchten Sie das Dokument dennoch anlegen?`, { title: "Dokument unvollständig", confirmText: "Trotzdem anlegen" })) return;
   }
   if (workflowEnabled && !assignee) return toast("Bitte einen Kollegen für die Workflow-Aufgabe auswählen.");
   if (visibility.mode === "selected" && !visibility.ids.length) return toast("Bitte mindestens einen Mitarbeiter für die Sichtbarkeit auswählen.");
@@ -736,7 +737,7 @@ async function archiveCurrentDoc(id) {
 
 async function deleteCurrentDoc(id) {
   if (currentProfile?.role !== "admin") return toast("Nur ein Admin darf Dokumente löschen.");
-  if (!confirm(`Dokument ${id} in das persönliche bzw. QM-Archiv verschieben?`)) return;
+  if (!await portalConfirm(`Dokument ${id} in das persönliche bzw. QM-Archiv verschieben?`, { title: "Dokument archivieren", confirmText: "Ins Archiv verschieben" })) return;
   try {
     await deleteDocument(id);
     await refreshWorkflows();
@@ -755,11 +756,21 @@ async function openPdfCurrentDoc(id) {
   if (!canAccessPdf(d, { ...currentProfile, uid: currentUser?.uid })) return toast("Die PDF-Lesefassung ist für Sie nicht freigegeben.");
   try { await openPdfFile(id); } catch (e) { toast(e.message); }
 }
-async function restoreArchive(id){ if(!confirm("Dieses Element wirklich wiederherstellen?"))return; try{await restoreArchiveItem(id);await Promise.all([refreshDocuments(),refreshWorkflows()]);toast("Element wurde wiederhergestellt.");render("archive");}catch(err){toast(err.message||"Wiederherstellung nicht möglich.");}}
-async function deleteArchiveForever(id){if(!confirm("Dieses Element wirklich endgültig löschen? Dieser Vorgang kann nicht rückgängig gemacht werden."))return;try{await permanentlyDeleteArchiveItem(id);toast("Element wurde endgültig gelöscht.");render("archive");}catch(err){toast(err.message||"Endgültiges Löschen nicht möglich.");}}
+async function restoreArchive(id){ if(!await portalConfirm("Dieses Element wirklich wiederherstellen?", { title: "Wiederherstellen", confirmText: "Wiederherstellen" }))return; try{await restoreArchiveItem(id);await Promise.all([refreshDocuments(),refreshWorkflows()]);toast("Element wurde wiederhergestellt.");render("archive");}catch(err){toast(err.message||"Wiederherstellung nicht möglich.");}}
+async function deleteArchiveForever(id){if(!await portalConfirm("Dieses Element wirklich endgültig löschen? Dieser Vorgang kann nicht rückgängig gemacht werden.", { title: "Endgültig löschen", confirmText: "Endgültig löschen", danger: true }))return;try{await permanentlyDeleteArchiveItem(id);toast("Element wurde endgültig gelöscht.");render("archive");}catch(err){toast(err.message||"Endgültiges Löschen nicht möglich.");}}
 async function openArchiveItem(id){try{const r=await getArchiveFileUrl(id,"inline");window.open(r.url,"_blank","noopener");}catch(err){toast(err.message||"Archivdatei konnte nicht geöffnet werden.");}}
 function closeModal() { if (modal.open) modal.close(); }
-function toast(msg) { const t = document.querySelector("#toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2800); }
+function toast(msg) {
+  const t = document.querySelector("#toast");
+  const text = String(msg || "");
+  t.textContent = text;
+  t.classList.remove("success", "warning", "error");
+  const lower = text.toLowerCase();
+  t.classList.add(/fehl|nicht möglich|nicht gefunden|nicht freigegeben|dürfen nicht|nur der|ausschließlich/.test(lower) ? "error" : /bitte|maximal|zwingend|während/.test(lower) ? "warning" : "success");
+  t.classList.add("show");
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => t.classList.remove("show"), 3000);
+}
 
 async function applyProfile(profile, user) {
   currentProfile = profile;

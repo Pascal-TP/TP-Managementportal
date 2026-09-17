@@ -1,3 +1,4 @@
+import { portalConfirm } from "./ui-feedback.js";
 import { getPortalSettings } from "./settings.js";
 import { auth, cloudFunctions } from "./firebase.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
@@ -384,7 +385,7 @@ export async function renderPublicAreasModule(ctx) {
   async function directVideoUpload(file,overwrite){ const idToken=await token(); const prep=unwrap(await callPrepareLargeVideo({idToken,area:"public",parentId:state.folderId,fileName:file.name,contentType:file.type||"application/octet-stream",size:file.size,overwrite})); const response=await fetch(prep.uploadUrl,{method:"PUT",headers:{"Content-Type":file.type||"application/octet-stream"},body:file}); if(!response.ok)throw new Error(`Direktupload fehlgeschlagen (${response.status}).`); await callFinalizeLargeVideo({idToken,area:"public",parentId:state.folderId,fileId:prep.fileId,storagePath:prep.storagePath,name:prep.name,contentType:file.type||"application/octet-stream",size:file.size,oldStoragePath:prep.oldStoragePath||null}); }
   async function uploadFiles(fileList) {
     const files=[...(fileList||[])]; if(!files.length)return; let uploaded=0;
-    for(const file of files){ const existing=duplicate(file); let overwrite=false; if(existing){overwrite=confirm("Eine Datei mit identischen Namen existiert bereits. Möchten Sie diese überschreiben?");if(!overwrite)continue;} if(!isVideo(file)&&file.size>(getPortalSettings().uploadMaxMB||20)*1024*1024){toast(`${file.name}: maximal ${getPortalSettings().uploadMaxMB||20} MB je Datei.`);continue;} showBusy(`„${file.name}“ wird hochgeladen …`); try{ if(isVideo(file)&&file.size>(getPortalSettings().uploadMaxMB||20)*1024*1024)await directVideoUpload(file,overwrite); else {const idToken=await token();const base64Data=await fileToBase64(file);await callUpload({idToken,parentId:state.folderId,fileName:file.name,contentType:file.type||"application/octet-stream",base64Data,overwrite});} uploaded++;}catch(err){toast(`${file.name}: ${errorText(err,"Upload fehlgeschlagen.")}`);} }
+    for(const file of files){ const existing=duplicate(file); let overwrite=false; if(existing){overwrite=await portalConfirm("Eine Datei mit identischen Namen existiert bereits. Möchten Sie diese überschreiben?", { title: "Datei bereits vorhanden", confirmText: "Überschreiben" });if(!overwrite)continue;} if(!isVideo(file)&&file.size>(getPortalSettings().uploadMaxMB||20)*1024*1024){toast(`${file.name}: maximal ${getPortalSettings().uploadMaxMB||20} MB je Datei.`);continue;} showBusy(`„${file.name}“ wird hochgeladen …`); try{ if(isVideo(file)&&file.size>(getPortalSettings().uploadMaxMB||20)*1024*1024)await directVideoUpload(file,overwrite); else {const idToken=await token();const base64Data=await fileToBase64(file);await callUpload({idToken,parentId:state.folderId,fileName:file.name,contentType:file.type||"application/octet-stream",base64Data,overwrite});} uploaded++;}catch(err){toast(`${file.name}: ${errorText(err,"Upload fehlgeschlagen.")}`);} }
     if(uploaded)toast(uploaded===1?"Datei wurde hochgeladen.":`${uploaded} Dateien wurden hochgeladen.`); await loadCurrent();
   }
 
@@ -430,7 +431,7 @@ export async function renderPublicAreasModule(ctx) {
     const source = kind === "folder" ? state.items.folders : kind === "file" ? state.items.files : state.items.links;
     const item = source.find(x => x.id === id); if (!item) return;
     const message = kind === "folder" ? `Leeren Ordner „${item.name}“ in das Archiv verschieben?` : `${kind === "link" ? "Link" : "Datei"} „${item.name}“ in das Archiv verschieben?`;
-    if (!confirm(message)) return;
+    if (!await portalConfirm(message, { title: "Ins Archiv verschieben", confirmText: "Ins Archiv verschieben" })) return;
     try {
       const idToken = await token();
       await callDelete({ idToken, kind, itemId: id });

@@ -1,3 +1,4 @@
+import { portalConfirm, portalPrompt } from "./ui-feedback.js";
 import { getPortalSettings } from "./settings.js";
 import { auth, cloudFunctions } from "./firebase.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
@@ -335,7 +336,7 @@ export async function renderMyFilesModule(ctx) {
     const files = [...(fileList || [])]; if (!files.length) return; let uploaded=0;
     for (const file of files) {
       const existing=duplicate(file); let overwrite=false;
-      if(existing){ overwrite=confirm("Eine Datei mit identischen Namen existiert bereits. Möchten Sie diese überschreiben?"); if(!overwrite) continue; }
+      if(existing){ overwrite=await portalConfirm("Eine Datei mit identischen Namen existiert bereits. Möchten Sie diese überschreiben?", { title: "Datei bereits vorhanden", confirmText: "Überschreiben" }); if(!overwrite) continue; }
       if (!isVideo(file) && file.size > (getPortalSettings().uploadMaxMB || 20) * 1024 * 1024) { toast(`${file.name}: maximal ${getPortalSettings().uploadMaxMB || 20} MB je Datei.`); continue; }
       showBusy(`„${file.name}“ wird hochgeladen …`);
       try {
@@ -384,7 +385,7 @@ export async function renderMyFilesModule(ctx) {
   async function renameItem(kind, id) {
     const item = kind === "folder" ? state.items.folders.find(x => x.id === id) : state.items.files.find(x => x.id === id);
     if (!item) return;
-    const name = prompt("Neuer Name:", item.name);
+    const name = await portalPrompt("Neuer Name:", item.name, { title: "Umbenennen" });
     if (!name || name.trim() === item.name) return;
     try {
       const idToken = await token();
@@ -397,7 +398,7 @@ export async function renderMyFilesModule(ctx) {
     const item = kind === "folder" ? state.items.folders.find(x => x.id === id) : state.items.files.find(x => x.id === id);
     if (!item) return;
     const message = kind === "folder" ? `Leeren Ordner „${item.name}“ in das Archiv verschieben?` : `Datei „${item.name}“ in das Archiv verschieben?`;
-    if (!confirm(message)) return;
+    if (!await portalConfirm(message, { title: "Ins Archiv verschieben", confirmText: "Ins Archiv verschieben" })) return;
     try {
       const idToken = await token();
       await callDelete({ idToken, kind, itemId: id });
