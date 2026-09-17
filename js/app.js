@@ -523,12 +523,22 @@ async function submitNewDocument(e) {
   const visibility = readVisibilitySelection("doc");
   if (!document.querySelector("#doc-title").value.trim()) return toast("Bitte einen Titel eingeben.");
   if (!workflowMandatory && !freeDocumentNumber) return toast("Bitte eine Dokumentnummer eingeben.");
-  if (workflowEnabled && (!pendingUploadFile || !pendingPdfFile)) return toast("Bei einem Workflow sind Originaldatei und PDF-Lesefassung erforderlich.");
+  if (workflowEnabled) {
+    const workflowMissing = [];
+    if (!assignee) workflowMissing.push("einen Kollegen für die Workflow-Aufgabe auswählen");
+    if (!pendingUploadFile) workflowMissing.push("eine Originaldatei auswählen");
+    if (!pendingPdfFile) workflowMissing.push("eine PDF-Lesefassung auswählen");
+    if (workflowMissing.length) {
+      const message = workflowMissing.length === 1
+        ? `Bitte ${workflowMissing[0]}.`
+        : `Bitte noch folgende Angaben ergänzen: ${workflowMissing.map(item => `• ${item}`).join("  ")}.`;
+      return toast(message);
+    }
+  }
   if (!workflowEnabled && (!pendingUploadFile || !pendingPdfFile)) {
     const missing = !pendingUploadFile && !pendingPdfFile ? "Originaldatei und PDF-Lesefassung fehlen." : !pendingUploadFile ? "Die Originaldatei fehlt." : "Die PDF-Lesefassung fehlt.";
     if (!await portalConfirm(`${missing} Möchten Sie das Dokument dennoch anlegen?`, { title: "Dokument unvollständig", confirmText: "Trotzdem anlegen" })) return;
   }
-  if (workflowEnabled && !assignee) return toast("Bitte einen Kollegen für die Workflow-Aufgabe auswählen.");
   if (visibility.mode === "selected" && !visibility.ids.length) return toast("Bitte mindestens einen Mitarbeiter für die Sichtbarkeit auswählen.");
   if (numberRequired && !qmUser) return toast("Der Benutzer ‚QM‘ wurde noch nicht gefunden. Bitte den QM-Zugang zuerst im TP-Personalmanagement anlegen und für das Managementportal freischalten.");
   const sourceIsPdf = pendingUploadFile && (pendingUploadFile.type === "application/pdf" || /\.pdf$/i.test(pendingUploadFile.name || ""));
