@@ -20,6 +20,8 @@ const state = {
   breadcrumbs: [],
   items: { folders: [], files: [] },
   favoritesOnly: false,
+  viewMode: "list",
+  galleryUrls: new Map(),
   busy: false,
   tree: {
     children: new Map(),
@@ -75,6 +77,15 @@ function humanSize(bytes = 0) {
 
 function safeEsc(esc, value) { return esc ? esc(value) : String(value ?? ""); }
 
+function isImageFile(file) {
+  const type = String(file?.contentType || "").toLowerCase();
+  const name = String(file?.name || "").toLowerCase();
+  return type.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|bmp|avif)$/i.test(name);
+}
+function galleryStorageKey(folderId) { return `tp-managementportal-myfiles-view:${folderId || "root"}`; }
+function loadViewMode(folderId) { try { return localStorage.getItem(galleryStorageKey(folderId)) === "gallery" ? "gallery" : "list"; } catch { return "list"; } }
+function saveViewMode(folderId, mode) { try { localStorage.setItem(galleryStorageKey(folderId), mode); } catch {} }
+
 export async function renderMyFilesModule(ctx) {
   const { content, modal, modalContent, esc, toast, profile, colleagues = [] } = ctx;
   if (!profile || (profile.role === "employee" && profile.managementPortalDocumentAccess !== true)) {
@@ -91,7 +102,13 @@ export async function renderMyFilesModule(ctx) {
           <input id="myfiles-file-input" type="file" multiple hidden>
           <button class="btn secondary" id="myfiles-refresh">↻ Aktualisieren</button>
         </div>
-        <button class="btn secondary myfiles-favorite-filter" id="myfiles-favorites">☆ Nur Favoriten</button>
+        <div class="myfiles-toolbar-right">
+          <div class="public-view-toggle" aria-label="Ansicht wählen">
+            <button class="public-view-btn" id="myfiles-view-list" type="button" title="Listenansicht">☷ Liste</button>
+            <button class="public-view-btn" id="myfiles-view-gallery" type="button" title="Bildvorschau">▦ Vorschau</button>
+          </div>
+          <button class="btn secondary myfiles-favorite-filter" id="myfiles-favorites">☆ Nur Favoriten</button>
+        </div>
       </div>
       <div class="myfiles-explorer">
         <aside class="myfiles-tree-panel" id="myfiles-tree-panel">
@@ -106,7 +123,7 @@ export async function renderMyFilesModule(ctx) {
             <div><strong>Dateien hier hineinziehen und ablegen</strong><small>oder oben „Dateien hochladen“ wählen · maximal ${getPortalSettings().uploadMaxMB || 20} MB je Datei · Videos ohne Portal-Größenlimit</small></div>
           </div>
           <div class="card myfiles-card">
-            <div class="myfiles-list-head">
+            <div class="myfiles-list-head" id="myfiles-list-head">
               <div>Name</div><div>Geändert</div><div>Größe</div><div>Aktionen</div>
             </div>
             <div id="myfiles-list" class="myfiles-list"><div class="myfiles-loading">Dateien werden geladen …</div></div>
@@ -124,6 +141,10 @@ export async function renderMyFilesModule(ctx) {
   const explorer = content.querySelector(".myfiles-explorer");
   const treeCollapse = content.querySelector("#myfiles-tree-collapse");
   const treeShow = content.querySelector("#myfiles-tree-show");
+  const listHead = content.querySelector("#myfiles-list-head");
+  const viewListBtn = content.querySelector("#myfiles-view-list");
+  const viewGalleryBtn = content.querySelector("#myfiles-view-gallery");
+  state.viewMode = loadViewMode(state.folderId);
 
   const showBusy = (text = "Bitte warten …") => { list.innerHTML = `<div class="myfiles-loading">${safeEsc(esc, text)}</div>`; };
 
@@ -222,6 +243,8 @@ export async function renderMyFilesModule(ctx) {
       const data = unwrap(await callList({ idToken, parentId: state.folderId }));
       state.items = { folders: data.folders || [], files: data.files || [] };
       state.breadcrumbs = data.breadcrumbs || [];
+      state.viewMode = loadViewMode(state.folderId);
+      state.galleryUrls.clear();
       draw();
       await syncTreeWithCurrent();
     } catch (err) {
@@ -278,22 +301,64 @@ export async function renderMyFilesModule(ctx) {
       </div></div>`;
   }
 
-  function draw() {
-    drawBreadcrumbs();
-    favoriteBtn.textContent = state.favoritesOnly ? "★ Favoriten anzeigen" : "☆ Nur Favoriten";
-    let folders = state.items.folders || [];
-    let files = state.items.files || [];
-    if (state.favoritesOnly) {
-      folders = folders.filter(x => x.favorite === true);
-      files = files.filter(x => x.favorite === true);
-    }
-    const rows = [...folders.map(rowFolder), ...files.map(rowFile)];
-    list.innerHTML = rows.length ? rows.join("") : `<div class="myfiles-empty"><span>▱</span><strong>${state.favoritesOnly ? "Keine Favoriten in diesem Ordner" : "Dieser Ordner ist leer"}</strong><small>Neue Ordner anlegen oder Dateien hineinziehen.</small></div>`;
-    bindRows();
+  function setViewMode(mode) {
+    state.viewMode = mode === "gallery" ? "gallery" : "list";
+    saveViewMode(state.folderId, state.viewMode);
+    draw();
   }
 
+  function updateViewButtons() {
+    viewListBtn?.classList.toggle("active", state.viewMode === "list");
+    viewGalleryBtn?.classList.toggle("active", state.viewMode === "gallery");
+  }
+
+  function galleryTile(file, index) {
+    return `<article class="public-gallery-tile" data-gallery-index="${index}">
+      <button class="public-gallery-image" data-gallery-open="${safeEsc(esc, file.id)}" aria-label="${safeEsc(esc, file.name)} öffnen"><span class="public-gallery-placeholder">IMG</span><img data-gallery-thumb="${safeEsc(esc, file.id)}" alt="${safeEsc(esc, file.name)}" loading="lazy"></button>
+      <div class="public-gallery-caption"><strong title="${safeEsc(esc, file.name)}">${safeEsc(esc, file.name)}</strong><small>${humanSize(file.size)}</small></div>
+      <div class="public-gallery-actions"><button class="icon-btn" data-favorite-file="${safeEsc(esc, file.id)}" title="Favorit">${file.favorite ? "★" : "☆"}</button><button class="btn secondary small" data-deadline-file="${safeEsc(esc, file.id)}">${file.deadline ? `Frist: ${new Date(file.deadline+"T00:00:00").toLocaleDateString("de-DE")}` : "Frist"}</button><button class="btn secondary small" data-rename-file="${safeEsc(esc, file.id)}">Umbenennen</button><button class="btn danger small" data-delete-file="${safeEsc(esc, file.id)}">Löschen</button></div>
+    </article>`;
+  }
+
+  async function galleryUrl(fileId) {
+    if (state.galleryUrls.has(fileId)) return state.galleryUrls.get(fileId);
+    const idToken = await token();
+    const data = unwrap(await callUrl({ idToken, fileId, mode: "inline" }));
+    if (!data.url) throw new Error("Keine Datei-URL erhalten.");
+    state.galleryUrls.set(fileId, data.url); return data.url;
+  }
+
+  function loadGalleryThumbs() {
+    const images = [...list.querySelectorAll("img[data-gallery-thumb]")];
+    const loadOne = async img => { if (img.dataset.loaded) return; img.dataset.loaded = "1"; try { img.src = await galleryUrl(img.dataset.galleryThumb); img.onload = () => img.closest(".public-gallery-image")?.classList.add("loaded"); } catch { img.closest(".public-gallery-image")?.classList.add("failed"); } };
+    if (!("IntersectionObserver" in window)) { images.forEach(loadOne); return; }
+    const observer = new IntersectionObserver(entries => entries.forEach(entry => { if (entry.isIntersecting) { observer.unobserve(entry.target); loadOne(entry.target); } }), { rootMargin: "250px" }); images.forEach(img => observer.observe(img));
+  }
+
+  async function openGalleryLightbox(fileId) {
+    let images = (state.items.files || []).filter(isImageFile); if (state.favoritesOnly) images = images.filter(x => x.favorite === true);
+    let index = images.findIndex(x => x.id === fileId); if (index < 0) return;
+    const overlay = document.createElement("div"); overlay.className = "public-lightbox"; overlay.innerHTML = `<button class="public-lightbox-close" type="button" aria-label="Schließen">×</button><button class="public-lightbox-nav prev" type="button" aria-label="Vorheriges Bild">‹</button><div class="public-lightbox-stage"><div class="public-lightbox-loading">Bild wird geladen …</div><img alt=""><div class="public-lightbox-caption"></div></div><button class="public-lightbox-nav next" type="button" aria-label="Nächstes Bild">›</button>`; document.body.appendChild(overlay);
+    const img = overlay.querySelector("img"), caption = overlay.querySelector(".public-lightbox-caption"), loading = overlay.querySelector(".public-lightbox-loading");
+    const close = () => { document.removeEventListener("keydown", key); overlay.remove(); };
+    const show = async nextIndex => { index = (nextIndex + images.length) % images.length; const file = images[index]; img.classList.remove("ready"); loading.hidden = false; loading.textContent = "Bild wird geladen …"; caption.textContent = `${file.name} · ${index + 1} von ${images.length}`; try { img.src = await galleryUrl(file.id); img.alt = file.name || "Bild"; img.onload = () => { loading.hidden = true; img.classList.add("ready"); }; } catch (err) { loading.textContent = errorText(err, "Bild konnte nicht geladen werden."); } };
+    const key = e => { if (e.key === "Escape") close(); if (e.key === "ArrowLeft") show(index - 1); if (e.key === "ArrowRight") show(index + 1); }; overlay.querySelector(".public-lightbox-close").onclick = close; overlay.querySelector(".prev").onclick = () => show(index - 1); overlay.querySelector(".next").onclick = () => show(index + 1); overlay.onclick = e => { if (e.target === overlay) close(); }; document.addEventListener("keydown", key); await show(index);
+  }
+
+  function draw() {
+    drawBreadcrumbs(); updateViewButtons(); favoriteBtn.textContent = state.favoritesOnly ? "★ Favoriten anzeigen" : "☆ Nur Favoriten";
+    let folders = state.items.folders || [], files = state.items.files || []; if (state.favoritesOnly) { folders = folders.filter(x => x.favorite === true); files = files.filter(x => x.favorite === true); }
+    if (state.viewMode === "gallery") {
+      const images = files.filter(isImageFile), otherFiles = files.filter(x => !isImageFile(x)); listHead.hidden = true;
+      const gallery = images.length ? `<div class="public-gallery"><div class="public-gallery-info"><strong>${images.length} ${images.length === 1 ? "Bild" : "Bilder"}</strong><span>Klicken zum Vergrößern · mit ← → durchblättern</span></div><div class="public-gallery-grid">${images.map(galleryTile).join("")}</div></div>` : "";
+      const others = [...folders.map(rowFolder), ...otherFiles.map(rowFile)], otherBlock = others.length ? `<div class="public-gallery-other"><div class="public-gallery-section-title">Weitere Inhalte</div>${others.join("")}</div>` : "";
+      list.innerHTML = gallery || otherBlock ? gallery + otherBlock : `<div class="myfiles-empty"><span>▱</span><strong>${state.favoritesOnly ? "Keine Favoriten in diesem Ordner" : "Dieser Ordner ist leer"}</strong><small>Neue Ordner anlegen oder Dateien hineinziehen.</small></div>`; bindRows(); loadGalleryThumbs(); return;
+    }
+    listHead.hidden = false; const rows = [...folders.map(rowFolder), ...files.map(rowFile)]; list.innerHTML = rows.length ? rows.join("") : `<div class="myfiles-empty"><span>▱</span><strong>${state.favoritesOnly ? "Keine Favoriten in diesem Ordner" : "Dieser Ordner ist leer"}</strong><small>Neue Ordner anlegen oder Dateien hineinziehen.</small></div>`; bindRows();
+  }
   function bindRows() {
     list.querySelectorAll("[data-open-folder]").forEach(btn => btn.onclick = () => { state.folderId = btn.dataset.openFolder; state.favoritesOnly = false; loadCurrent(); });
+    list.querySelectorAll("[data-gallery-open]").forEach(btn => btn.onclick = e => { e.stopPropagation(); openGalleryLightbox(btn.dataset.galleryOpen); });
     list.querySelectorAll("[data-open-file]").forEach(btn => btn.onclick = () => openFile(btn.dataset.openFile));
     list.querySelectorAll("[data-share-folder]").forEach(btn => btn.onclick = () => shareFolderDialog(btn.dataset.shareFolder));
     list.querySelectorAll("[data-rename-folder]").forEach(btn => btn.onclick = () => renameItem("folder", btn.dataset.renameFolder));
@@ -419,6 +484,8 @@ export async function renderMyFilesModule(ctx) {
 
   content.querySelector("#myfiles-new-folder").onclick = createFolderDialog;
   content.querySelector("#myfiles-upload").onclick = () => input.click();
+  viewListBtn.onclick = () => setViewMode("list");
+  viewGalleryBtn.onclick = () => setViewMode("gallery");
   content.querySelector("#myfiles-refresh").onclick = loadCurrent;
   favoriteBtn.onclick = () => { state.favoritesOnly = !state.favoritesOnly; draw(); };
   input.onchange = () => { uploadFiles(input.files); input.value = ""; };
