@@ -1,4 +1,4 @@
-import { portalConfirm } from "./ui-feedback.js";
+import { portalConfirm, portalAlert } from "./ui-feedback.js";
 import {
   login,
   logout,
@@ -531,8 +531,9 @@ async function submitNewDocument(e) {
     if (workflowMissing.length) {
       const message = workflowMissing.length === 1
         ? `Bitte ${workflowMissing[0]}.`
-        : `Bitte noch folgende Angaben ergänzen: ${workflowMissing.map(item => `• ${item}`).join("  ")}.`;
-      return toast(message);
+        : `Bitte noch folgende Angaben ergänzen:\n\n${workflowMissing.map(item => `• ${item}`).join("\n")}`;
+      await portalAlert(message, { title: "Workflow noch nicht vollständig", kind: "warning" });
+      return;
     }
   }
   if (!workflowEnabled && (!pendingUploadFile || !pendingPdfFile)) {

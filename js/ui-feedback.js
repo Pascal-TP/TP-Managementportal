@@ -13,6 +13,23 @@ function openFeedback(html){
   return true;
 }
 
+
+export function portalAlert(message, options={}){
+  const d=dialog();
+  if(!d){ window.alert(message); return Promise.resolve(); }
+  const title=options.title||"Hinweis";
+  const buttonText=options.buttonText||"OK";
+  const kind=options.kind||"warning";
+  const icon=kind==="error"?"!":kind==="success"?"✓":"i";
+  return new Promise(resolve=>{
+    openFeedback(`<div class="feedback-box feedback-${esc(kind)}"><div class="feedback-icon">${icon}</div><h2>${esc(title)}</h2><p style="white-space:pre-line">${esc(message)}</p><div class="feedback-actions"><button class="btn primary" data-feedback-ok>${esc(buttonText)}</button></div></div>`);
+    let settled=false;
+    const finish=()=>{if(settled)return;settled=true;d.close();resolve();};
+    box().querySelector('[data-feedback-ok]').onclick=finish;
+    d.oncancel=e=>{e.preventDefault();finish();};
+  });
+}
+
 export function portalConfirm(message, options={}){
   const d=dialog();
   if(!d) return Promise.resolve(window.confirm(message));
