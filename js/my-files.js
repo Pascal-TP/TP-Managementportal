@@ -249,12 +249,15 @@ export async function renderMyFilesModule(ctx) {
   }
 
   function rowFolder(folder) {
+    const isShared = folder.shareAll === true || (Array.isArray(folder.sharedWithUserIds) && folder.sharedWithUserIds.length > 0);
+    const shareLabel = isShared ? "Freigegeben" : "Freigeben";
+    const shareClass = isShared ? "btn shared small" : "btn secondary small";
     return `<div class="myfiles-row folder" data-folder-id="${safeEsc(esc, folder.id)}">
       <button class="myfiles-name-cell" data-open-folder="${safeEsc(esc, folder.id)}"><span class="myfiles-type-icon folder-icon2">▰</span><span><strong>${safeEsc(esc, folder.name)}</strong><small>Ordner</small></span></button>
       <div>${fmtDateTime(folder.updatedAt || folder.createdAt)}</div><div>–</div>
       <div class="myfiles-actions">
         <button class="icon-btn" data-favorite-folder="${safeEsc(esc, folder.id)}" title="Favorit">${folder.favorite ? "★" : "☆"}</button>
-        <button class="btn secondary small" data-share-folder="${safeEsc(esc, folder.id)}">Freigeben</button>
+        <button class="${shareClass}" data-share-folder="${safeEsc(esc, folder.id)}">${shareLabel}</button>
         <button class="btn secondary small" data-rename-folder="${safeEsc(esc, folder.id)}">Umbenennen</button>
         <button class="btn danger small" data-delete-folder="${safeEsc(esc, folder.id)}">Löschen</button>
       </div></div>`;
