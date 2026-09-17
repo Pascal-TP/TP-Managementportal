@@ -130,3 +130,11 @@ dialog{border:0;border-radius:15px;padding:0;width:min(760px,94vw);box-shadow:0 
 
 /* Freigabestatus eigener Ordner */
 .btn.shared{background:#e5f4e9;color:#27643a;border:1px solid #c9e6d1}.btn.shared:hover{background:#d8eddf;color:#205631}
+
+/* V3.5 – Bildvorschau / Galerie auch in „Meine Dateien“ */
+.myfiles-toolbar-right{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+@media(max-width:760px){.myfiles-toolbar-right{width:100%;justify-content:space-between}.myfiles-toolbar-right .public-view-toggle{flex:1}.myfiles-toolbar-right .public-view-btn{flex:1}}
+
+/* V3.5 – Bildvorschau / Galerie auch in „Meine Dateien“ */
+.myfiles-toolbar-right{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+@media(max-width:760px){.myfiles-toolbar-right{width:100%;justify-content:space-between}.myfiles-toolbar-right .public-view-toggle{flex:1}.myfiles-toolbar-right .public-view-btn{flex:1}}
