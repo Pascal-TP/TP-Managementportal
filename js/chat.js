@@ -1,4 +1,4 @@
-import { portalCall } from "./document-store.js";
+import { portalCall, fileToBase64 } from "./document-store.js";
 
 let ctx = null;
 let conversations = [];
@@ -6,6 +6,7 @@ let activeId = "";
 let pollTimer = null;
 let lastMessageSignature = "";
 let unreadCallback = null;
+let pendingImage = null;
 
 function esc(s=""){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[m]);}
 function fmt(v){if(!v)return "";const d=new Date(v);return Number.isNaN(d.getTime())?"":d.toLocaleString("de-DE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});}
@@ -15,7 +16,7 @@ function displayName(c){if(c.type==="group")return c.title||"Gruppe";const other
 function subtitle(c){if(c.type==="group")return `${(c.memberIds||[]).length} Mitglieder`;const other=(c.members||[]).find(m=>String(m.uid)!==myUid());return other?.roleLabel||other?.email||"Direktnachricht";}
 function isUnread(c){return Boolean(c.unread);}
 
-export function stopChatModule(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;}ctx=null;activeId="";lastMessageSignature="";}
+export function stopChatModule(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;}ctx=null;activeId="";lastMessageSignature="";pendingImage=null;}
 export function setChatUnreadCallback(fn){unreadCallback=fn;}
 
 export async function getChatUnreadCount(){
@@ -81,15 +82,22 @@ function renderMain(c,messages){
   const main=document.querySelector("#chat-main");if(!main)return;
   main.innerHTML=`<div class="chat-main-head"><div class="chat-head-avatar ${c.type==="group"?"group":""}">${c.type==="group"?"👥":esc(initials(displayName(c)))}</div><div><strong>${esc(displayName(c))}</strong><span>${esc(subtitle(c))}</span></div></div>
   <div id="chat-messages" class="chat-messages">${messages.length?messages.map(messageHtml).join(""):'<div class="chat-first-message">Noch keine Nachricht. Schreiben Sie die erste Nachricht.</div>'}</div>
-  <form id="chat-compose" class="chat-compose"><textarea id="chat-text" rows="1" maxlength="4000" placeholder="Nachricht schreiben …"></textarea><button class="chat-send" type="submit" title="Senden">➤</button></form>`;
+  <div id="chat-image-preview" class="chat-image-preview hidden"></div>
+  <form id="chat-compose" class="chat-compose"><input id="chat-image-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden><button class="chat-attach" type="button" id="chat-attach" title="Bild anhängen">📎</button><textarea id="chat-text" rows="1" maxlength="4000" placeholder="Nachricht schreiben …"></textarea><button class="chat-send" type="submit" title="Senden">➤</button></form>`;
   const area=document.querySelector("#chat-text");
   area.addEventListener("input",()=>{area.style.height="auto";area.style.height=Math.min(area.scrollHeight,120)+"px";});
   area.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();document.querySelector("#chat-compose").requestSubmit();}});
+  area.addEventListener("paste",e=>{const f=[...(e.clipboardData?.files||[])].find(x=>x.type.startsWith("image/"));if(f){e.preventDefault();setPendingImage(f);}});
+  const input=document.querySelector("#chat-image-input");document.querySelector("#chat-attach").onclick=()=>input.click();input.onchange=()=>{if(input.files?.[0])setPendingImage(input.files[0]);input.value="";};
+  main.ondragover=e=>{if([...e.dataTransfer.items].some(x=>x.kind==="file"&&x.type.startsWith("image/"))){e.preventDefault();main.classList.add("chat-dragging");}};
+  main.ondragleave=e=>{if(!main.contains(e.relatedTarget))main.classList.remove("chat-dragging");};
+  main.ondrop=e=>{main.classList.remove("chat-dragging");const f=[...e.dataTransfer.files].find(x=>x.type.startsWith("image/"));if(f){e.preventDefault();setPendingImage(f);}};
   document.querySelector("#chat-compose").onsubmit=sendMessage;
   const box=document.querySelector("#chat-messages");box.scrollTop=box.scrollHeight;
 }
-function messageHtml(m){const mine=String(m.senderUid)===myUid();return `<div class="chat-message-row ${mine?"mine":"theirs"}">${!mine?`<div class="chat-mini-avatar">${esc(initials(m.senderName))}</div>`:""}<div class="chat-bubble"><div class="chat-message-meta">${!mine?`<strong>${esc(m.senderName||"Mitarbeiter")}</strong>`:""}<span>${fmt(m.createdAt)}</span></div><div class="chat-message-text">${esc(m.text).replace(/\n/g,"<br>")}</div></div></div>`;}
-async function sendMessage(e){e.preventDefault();const area=document.querySelector("#chat-text");const text=area.value.trim();if(!text||!activeId)return;area.value="";area.style.height="auto";try{await portalCall("sendManagementPortalChatMessage",{conversationId:activeId,text});await loadMessages(true);await refreshConversations(false);}catch(err){ctx.toast?.(err.message||"Nachricht konnte nicht gesendet werden.");area.value=text;}}
+function messageHtml(m){const mine=String(m.senderUid)===myUid();const image=m.attachment?.type==="image"&&m.attachment?.url?`<button class="chat-image-button" type="button" onclick="window.open('${esc(m.attachment.url)}','_blank','noopener')"><img class="chat-message-image" src="${esc(m.attachment.url)}" alt="${esc(m.attachment.fileName||"Chatbild")}" loading="lazy"></button>`:"";const text=m.text?`<div class="chat-message-text">${esc(m.text).replace(/\n/g,"<br>")}</div>`:"";return `<div class="chat-message-row ${mine?"mine":"theirs"}">${!mine?`<div class="chat-mini-avatar">${esc(initials(m.senderName))}</div>`:""}<div class="chat-bubble ${image?"has-image":""}"><div class="chat-message-meta">${!mine?`<strong>${esc(m.senderName||"Mitarbeiter")}</strong>`:""}<span>${fmt(m.createdAt)}</span></div>${image}${text}</div></div>`;}
+function setPendingImage(file){if(!file?.type?.startsWith("image/"))return ctx.toast?.("Bitte eine Bilddatei auswählen.");if(file.size>5*1024*1024)return ctx.toast?.("Das Bild darf maximal 5 MB groß sein.");pendingImage=file;const box=document.querySelector("#chat-image-preview");if(!box)return;const url=URL.createObjectURL(file);box.classList.remove("hidden");box.innerHTML=`<div><img src="${url}" alt="Vorschau"><span><strong>${esc(file.name||"Bild aus Zwischenablage")}</strong><small>${Math.max(1,Math.round(file.size/1024))} KB</small></span><button type="button" id="chat-image-remove" title="Bild entfernen">×</button></div>`;document.querySelector("#chat-image-remove").onclick=()=>{pendingImage=null;box.classList.add("hidden");box.innerHTML="";URL.revokeObjectURL(url);};}
+async function sendMessage(e){e.preventDefault();const area=document.querySelector("#chat-text");const text=area.value.trim();const image=pendingImage;if((!text&&!image)||!activeId)return;area.disabled=true;document.querySelector("#chat-compose button[type=submit]").disabled=true;try{let imagePayload=null;if(image)imagePayload={fileName:image.name||`chatbild-${Date.now()}.png`,contentType:image.type,size:image.size,base64Data:await fileToBase64(image)};await portalCall("sendManagementPortalChatMessage",{conversationId:activeId,text,image:imagePayload});area.value="";area.style.height="auto";pendingImage=null;const preview=document.querySelector("#chat-image-preview");preview?.classList.add("hidden");if(preview)preview.innerHTML="";await loadMessages(true);await refreshConversations(false);}catch(err){ctx.toast?.(err.message||"Nachricht konnte nicht gesendet werden.");}finally{area.disabled=false;const btn=document.querySelector("#chat-compose button[type=submit]");if(btn)btn.disabled=false;area.focus();}}
 
 function openNewChatDialog(){
   const people=(ctx.colleagues||[]).filter(p=>String(p.id)!==myUid());
