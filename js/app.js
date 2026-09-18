@@ -61,6 +61,7 @@ import { renderPublicAreasModule } from "./public-areas.js";
 import { loadArchive, restoreArchiveItem, permanentlyDeleteArchiveItem, getArchiveFileUrl } from "./archive.js";
 import { loadHistory } from "./history.js";
 import { loadPortalSettings, getPortalSettings, savePortalSettings, uploadCompanyLogo } from "./settings.js";
+import { renderChatModule, stopChatModule, getChatUnreadCount, setChatUnreadCallback } from "./chat.js";
 
 let companies = ["Alle Unternehmen"];
 let companyMeta = {};
@@ -74,6 +75,7 @@ function applyPortalSettings(settings){
 }
 const fullNav = [
   ["dashboard", "▦", "Dashboard"],
+  ["chat", "💬", "Chat"],
   ["documents", "▤", "Dokumentenregister"],
   ["workflow", "✓", "Freigaben & Aufgaben"],
   ["deadlines", "◷", "Fristen & Wiedervorlagen"],
@@ -86,12 +88,14 @@ const fullNav = [
 ];
 const employeeNav = [
   ["dashboard", "▦", "Dashboard"],
+  ["chat", "💬", "Chat"],
   ["documents", "▤", "Dokumentenregister"],
   ["areas", "▣", "Öffentliche Bereiche"],
   ["shared", "♧", "Für mich freigegeben"],
 ];
 const employeeEditorNav = [
   ["dashboard", "▦", "Dashboard"],
+  ["chat", "💬", "Chat"],
   ["documents", "▤", "Dokumentenregister"],
   ["workflow", "✓", "Freigaben & Aufgaben"],
   ["deadlines", "◷", "Fristen & Wiedervorlagen"],
@@ -109,6 +113,7 @@ let colleagues = [];
 let qmUser = null;
 let pendingUploadFile = null;
 let pendingPdfFile = null;
+let chatUnreadCount = 0;
 const content = document.querySelector("#content");
 const title = document.querySelector("#page-title");
 const subtitle = document.querySelector("#page-subtitle");
@@ -207,7 +212,7 @@ function emptyState(titleText, text, button = "") {
 function initNav() {
   let nav = portalView === "employee" ? employeeNav : portalView === "employee-editor" ? employeeEditorNav : fullNav;
   if (currentProfile?.role !== "admin") nav = nav.filter(x => x[0] !== "history");
-  document.querySelector("#main-nav").innerHTML = nav.map(([id, ic, l]) => `<button class="nav-btn ${id === current ? "active" : ""}" data-page="${id}"><span class="icon">${ic}</span>${l}</button>`).join("");
+  document.querySelector("#main-nav").innerHTML = nav.map(([id, ic, l]) => `<button class="nav-btn ${id === current ? "active" : ""}" data-page="${id}"><span class="icon">${ic}</span><span class="nav-label">${l}</span>${id === "chat" && chatUnreadCount ? `<span class="nav-count">${chatUnreadCount > 99 ? "99+" : chatUnreadCount}</span>` : ""}</button>`).join("");
   document.querySelectorAll("#main-nav [data-page]").forEach(b => b.onclick = () => render(b.dataset.page));
 }
 function setHead(t, s) { title.textContent = t; subtitle.textContent = s; }
@@ -216,15 +221,21 @@ function render(page) {
   if (page === "settings" && currentProfile.role !== "admin") page = "dashboard";
   if (portalView === "employee" && !employeeNav.some(x => x[0] === page)) page = "dashboard";
   if (portalView === "employee-editor" && !employeeEditorNav.some(x => x[0] === page)) page = "dashboard";
+  if (current === "chat" && page !== "chat") stopChatModule();
   current = page;
   initNav();
   const views = portalView === "employee"
-    ? { dashboard: renderEmployeeDashboard, documents: renderEmployeeDocuments, deadlines: renderDeadlines, areas: renderAreas, myfiles: renderMyFiles, shared: renderShared }
+    ? { dashboard: renderEmployeeDashboard, chat: renderChat, documents: renderEmployeeDocuments, deadlines: renderDeadlines, areas: renderAreas, myfiles: renderMyFiles, shared: renderShared }
     : portalView === "employee-editor"
-      ? { dashboard: renderDashboard, documents: renderDocuments, workflow: renderWorkflow, deadlines: renderDeadlines, areas: renderAreas, myfiles: renderMyFiles, shared: renderShared, archive: renderArchive }
-      : { dashboard: renderDashboard, documents: renderDocuments, workflow: renderWorkflow, deadlines: renderDeadlines, areas: renderAreas, companies: renderCompanies, archive: renderArchive, history: renderHistory, myfiles: renderMyFiles, shared: renderShared, settings: renderSettings };
+      ? { dashboard: renderDashboard, chat: renderChat, documents: renderDocuments, workflow: renderWorkflow, deadlines: renderDeadlines, areas: renderAreas, myfiles: renderMyFiles, shared: renderShared, archive: renderArchive }
+      : { dashboard: renderDashboard, chat: renderChat, documents: renderDocuments, workflow: renderWorkflow, deadlines: renderDeadlines, areas: renderAreas, companies: renderCompanies, archive: renderArchive, history: renderHistory, myfiles: renderMyFiles, shared: renderShared, settings: renderSettings };
   (views[page] || views.dashboard)();
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+
+function renderChat() {
+  renderChatModule({ content, setHead, toast, profile: currentProfile, user: currentUser, colleagues, modal, modalContent });
 }
 
 function taskRow(task, own = false) {
@@ -794,6 +805,8 @@ async function applyProfile(profile, user) {
   const settingsBtn = document.querySelector("#settings-link");
   if (settingsBtn) settingsBtn.style.display = profile.role === "admin" ? "" : "none";
   colleagues = await loadAssignableColleagues();
+  setChatUnreadCallback(count => { chatUnreadCount = Number(count || 0); initNav(); });
+  chatUnreadCount = await getChatUnreadCount();
   qmUser = await loadQmUser();
   const portalSettings = await loadPortalSettings();
   applyPortalSettings(portalSettings);
