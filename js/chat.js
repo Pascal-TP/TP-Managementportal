@@ -80,7 +80,7 @@ async function loadMessages(force){
 
 function renderMain(c,messages){
   const main=document.querySelector("#chat-main");if(!main)return;
-  main.innerHTML=`<div class="chat-main-head"><div class="chat-head-avatar ${c.type==="group"?"group":""}">${c.type==="group"?"👥":esc(initials(displayName(c)))}</div><div class="chat-head-copy"><strong>${esc(displayName(c))}</strong><span>${esc(subtitle(c))}</span></div><button class="chat-head-menu" type="button" id="chat-hide" title="Chat aus meiner Ansicht entfernen">⋯</button></div>
+  main.innerHTML=`<div class="chat-main-head"><div class="chat-head-avatar ${c.type==="group"?"group":""}">${c.type==="group"?"👥":esc(initials(displayName(c)))}</div><div class="chat-head-copy"><strong>${esc(displayName(c))}</strong><span>${esc(subtitle(c))}</span></div><button class="chat-head-menu" type="button" id="chat-hide" title="Chat nur aus meiner Ansicht entfernen" aria-label="Chat ausblenden"><span aria-hidden="true">🗑</span><span>Chat ausblenden</span></button></div>
   <div id="chat-messages" class="chat-messages">${messages.length?messages.map(messageHtml).join(""):'<div class="chat-first-message">Noch keine Nachricht. Schreiben Sie die erste Nachricht.</div>'}</div>
   <div id="chat-image-preview" class="chat-image-preview hidden"></div>
   <form id="chat-compose" class="chat-compose"><input id="chat-image-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip" hidden><button class="chat-attach" type="button" id="chat-attach" title="Bild oder Datei anhängen">📎</button><textarea id="chat-text" rows="1" maxlength="4000" placeholder="Nachricht schreiben …"></textarea><button class="chat-send" type="submit" title="Senden">➤</button></form>`;
