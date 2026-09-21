@@ -2,6 +2,7 @@ import { portalConfirm } from "./ui-feedback.js";
 import { getPortalSettings } from "./settings.js";
 import { auth, cloudFunctions } from "./firebase.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
+import { beginPortalLoading, endPortalLoading } from "./loading-indicator.js";
 
 const callList = httpsCallable(cloudFunctions, "listManagementPortalPublicItems");
 const callCreateFolder = httpsCallable(cloudFunctions, "createManagementPortalPublicFolder");
@@ -141,6 +142,7 @@ export async function renderPublicAreasModule(ctx) {
   async function loadCurrent() {
     if (state.busy) return;
     state.busy = true;
+    const loadingId = beginPortalLoading(state.folderId ? "Ordnerinhalt wird geladen …" : "Dokumente werden geladen …");
     showBusy();
     try {
       const idToken = await token();
@@ -155,6 +157,7 @@ export async function renderPublicAreasModule(ctx) {
       list.innerHTML = `<div class="public-error">${safeEsc(esc, errorText(err, "Öffentlicher Bereich konnte nicht geladen werden."))}</div>`;
     } finally {
       state.busy = false;
+      endPortalLoading(loadingId);
     }
   }
 

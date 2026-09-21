@@ -1,4 +1,5 @@
 import { portalConfirm, portalAlert } from "./ui-feedback.js";
+import { beginPortalLoading, endPortalLoading } from "./loading-indicator.js";
 import {
   login,
   logout,
@@ -390,6 +391,7 @@ function renderCompanies() {
   content.innerHTML = `<div class="card"><div class="card-head"><div><h2>Unternehmensverbund</h2><p>Ein Dokument kann einer Firma oder allen Unternehmen zugeordnet werden.</p></div></div><div class="company-grid">${companies.slice(1).map(c => { const m = companyMeta[c]; const n = docs.filter(d => d.company === c || d.company === "Alle Unternehmen").length; return `<div class="company-card" onclick="render('documents')"><div class="company-logo-wrap"><img src="${m.logo}" alt="${esc(c)} Logo"></div><div class="company-card-copy"><strong>${esc(c)}</strong><span>${n} zugeordnete Dokumente</span></div><div class="company-card-arrow">›</div></div>`; }).join("")}</div></div>`;
 }
 async function renderArchive() {
+  const loadingId = beginPortalLoading("Archiv wird geladen …");
   setHead("Archiv", "Persönlicher Papierkorb und dauerhaft aufbewahrte Dokumentversionen.");
   content.innerHTML = `<div class="card">${emptyState("Archiv wird geladen", "Die archivierten Inhalte werden zentral abgerufen.")}</div>`;
   try {
@@ -405,9 +407,11 @@ async function renderArchive() {
     }).join("");
     content.innerHTML = `<div class="info-strip"><strong>Archivprinzip:</strong> Persönliche Löschungen bleiben personenbezogen. Inhalte aus „Öffentliche Bereiche“ stehen allen Admins im Admin-Archiv zur Verfügung. QM-gelenkte Dokumente und deren alte Versionen können niemals endgültig gelöscht werden.</div><div class="card"><div class="card-head"><div><h2>Archivierte Inhalte</h2><p>Gelöschte Elemente und frühere Dokumentstände.</p></div></div>${rows ? `<div class="archive-list">${rows}</div>` : emptyState("Archiv ist leer", "Aktuell befinden sich keine Inhalte in Ihrem Archiv.")}</div>`;
   } catch (err) { content.innerHTML = `<div class="card">${emptyState("Archiv konnte nicht geladen werden", err.message || "Bitte später erneut versuchen.")}</div>`; }
+  finally { endPortalLoading(loadingId); }
 }
 async function renderHistory() {
   if (currentProfile?.role !== "admin") return render("dashboard");
+  const loadingId = beginPortalLoading("Historie wird geladen …");
   setHead("Historie", "Zentrales, unveränderbares Aktivitätsprotokoll des Managementportals.");
   content.innerHTML = `<div class="card">${emptyState("Historie wird geladen", "Aktivitäten werden zentral abgerufen.")}</div>`;
   try {
@@ -415,6 +419,7 @@ async function renderHistory() {
     const rows = entries.map(h => `<tr><td>${fmtDateTime(h.at)}</td><td><strong>${esc(h.actorName || "System")}</strong><small>${esc(h.actorEmail || "")}</small></td><td>${esc(h.area || "–")}</td><td>${esc(h.action || "–")}</td><td><strong>${esc(h.label || h.itemId || "–")}</strong><small>${esc(h.kind || "")}</small></td></tr>`).join("");
     content.innerHTML = `<div class="info-strip"><strong>Nur für Admins:</strong> Die Historie protokolliert zentrale Aktionen und kann über die Portaloberfläche weder verändert noch gelöscht werden.</div><div class="card"><div class="card-head"><div><h2>Aktivitätsprotokoll</h2><p>Die letzten ${entries.length} protokollierten Vorgänge.</p></div></div>${rows ? `<div class="table-wrap"><table class="data-table history-table"><thead><tr><th>Zeitpunkt</th><th>Nutzer</th><th>Bereich</th><th>Aktion</th><th>Element</th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyState("Noch keine Historie", "Neue Aktionen werden ab V2.0 automatisch protokolliert.")}</div>`;
   } catch(err) { content.innerHTML = `<div class="card">${emptyState("Historie konnte nicht geladen werden", err.message || "Bitte später erneut versuchen.")}</div>`; }
+  finally { endPortalLoading(loadingId); }
 }
 
 function renderSettings(){
@@ -832,4 +837,17 @@ document.querySelector("#portal-info").onclick = () => {
 document.querySelector("#personalmanagement-link").onclick = () => window.open("https://pascal-tp.github.io/TP-Personalmanagement/", "_blank", "noopener");
 document.querySelector("#login-form").addEventListener("submit", async e => { e.preventDefault(); const msg = document.querySelector("#login-message"); msg.textContent = "Anmeldung läuft …"; try { await login(document.querySelector("#login-identifier").value, document.querySelector("#login-password").value); } catch (err) { console.error(err); msg.textContent = "Anmeldung nicht möglich. Bitte Zugangsdaten prüfen."; } });
 document.querySelector("#forgot-password-btn").onclick = async () => { try { await requestPasswordReset(document.querySelector("#login-identifier").value); toast("Passwort-Link wurde angefordert."); } catch (err) { toast(err.message || "Passwort-Link konnte nicht angefordert werden."); } };
-observeAuth(async user => { if (!user) return showLogin(); try { const profile = await loadPortalProfile(user); await showPortal(profile, user); } catch (err) { console.error(err); await logout(); showLogin(err.message || "Der Zugang zum TP-Managementportal ist nicht möglich."); } });
+observeAuth(async user => {
+  if (!user) return showLogin();
+  const loadingId = beginPortalLoading("Dashboard wird geladen …");
+  try {
+    const profile = await loadPortalProfile(user);
+    await showPortal(profile, user);
+  } catch (err) {
+    console.error(err);
+    await logout();
+    showLogin(err.message || "Der Zugang zum TP-Managementportal ist nicht möglich.");
+  } finally {
+    endPortalLoading(loadingId);
+  }
+});

@@ -2,6 +2,7 @@ import { portalConfirm, portalPrompt } from "./ui-feedback.js";
 import { getPortalSettings } from "./settings.js";
 import { auth, cloudFunctions } from "./firebase.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
+import { beginPortalLoading, endPortalLoading } from "./loading-indicator.js";
 
 const callList = httpsCallable(cloudFunctions, "listManagementPortalPrivateItems");
 const callCreateFolder = httpsCallable(cloudFunctions, "createManagementPortalPrivateFolder");
@@ -237,6 +238,7 @@ export async function renderMyFilesModule(ctx) {
   async function loadCurrent() {
     if (state.busy) return;
     state.busy = true;
+    const loadingId = beginPortalLoading(state.folderId ? "Ordnerinhalt wird geladen …" : "Dateien werden geladen …");
     showBusy("Dateien werden geladen …");
     try {
       const idToken = await token();
@@ -251,6 +253,7 @@ export async function renderMyFilesModule(ctx) {
       list.innerHTML = `<div class="myfiles-error">${safeEsc(esc, errorText(err, "Dateien konnten nicht geladen werden."))}</div>`;
     } finally {
       state.busy = false;
+      endPortalLoading(loadingId);
     }
   }
 

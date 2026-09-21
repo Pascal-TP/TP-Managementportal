@@ -1,4 +1,5 @@
 import { portalCall, fileToBase64 } from "./document-store.js";
+import { beginPortalLoading, endPortalLoading } from "./loading-indicator.js";
 
 let ctx = null;
 let conversations = [];
@@ -27,7 +28,8 @@ export async function renderChatModule(options){
   stopChatModule(); ctx=options;
   ctx.setHead?.("Chat","Interne Kommunikation im TP-Managementportal.");
   ctx.content.innerHTML=`<div class="chat-loading">Chat wird geladen …</div>`;
-  await refreshConversations(true);
+  const loadingId=beginPortalLoading("Chat wird geladen …");
+  try{await refreshConversations(true);}finally{endPortalLoading(loadingId);}
   pollTimer=setInterval(()=>{if(ctx)refreshConversations(false).catch(()=>{});},4000);
 }
 
