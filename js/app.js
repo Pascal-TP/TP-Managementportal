@@ -1,4 +1,3 @@
-import { beginPortalLoading, watchPortalLoading } from "./loading-indicator.js";
 import { portalConfirm, portalAlert } from "./ui-feedback.js";
 import {
   login,
@@ -805,8 +804,6 @@ async function applyProfile(profile, user) {
   document.querySelector("#user-avatar").textContent = initials(profile.name || profile.email);
   const settingsBtn = document.querySelector("#settings-link");
   if (settingsBtn) settingsBtn.style.display = profile.role === "admin" ? "" : "none";
-  const endLoading = beginPortalLoading("Dashboard wird geladen …");
-  try {
   colleagues = await loadAssignableColleagues();
   setChatUnreadCallback(count => { chatUnreadCount = Number(count || 0); initNav(); });
   chatUnreadCount = await getChatUnreadCount();
@@ -816,7 +813,6 @@ async function applyProfile(profile, user) {
   await Promise.all([initializeDocuments(), initializeWorkflows()]);
   current = "dashboard";
   render("dashboard");
-  } finally { endLoading(); }
 }
 function showLogin(message = "") { currentProfile = null; currentUser = null; document.querySelector("#app-shell").classList.add("hidden"); document.querySelector("#login-page").classList.remove("hidden"); document.querySelector("#login-message").textContent = message; }
 async function showPortal(profile, user) { document.querySelector("#login-message").textContent = ""; document.querySelector("#login-page").classList.add("hidden"); document.querySelector("#app-shell").classList.remove("hidden"); await applyProfile(profile, user); }
@@ -836,5 +832,4 @@ document.querySelector("#portal-info").onclick = () => {
 document.querySelector("#personalmanagement-link").onclick = () => window.open("https://pascal-tp.github.io/TP-Personalmanagement/", "_blank", "noopener");
 document.querySelector("#login-form").addEventListener("submit", async e => { e.preventDefault(); const msg = document.querySelector("#login-message"); msg.textContent = "Anmeldung läuft …"; try { await login(document.querySelector("#login-identifier").value, document.querySelector("#login-password").value); } catch (err) { console.error(err); msg.textContent = "Anmeldung nicht möglich. Bitte Zugangsdaten prüfen."; } });
 document.querySelector("#forgot-password-btn").onclick = async () => { try { await requestPasswordReset(document.querySelector("#login-identifier").value); toast("Passwort-Link wurde angefordert."); } catch (err) { toast(err.message || "Passwort-Link konnte nicht angefordert werden."); } };
-watchPortalLoading();
 observeAuth(async user => { if (!user) return showLogin(); try { const profile = await loadPortalProfile(user); await showPortal(profile, user); } catch (err) { console.error(err); await logout(); showLogin(err.message || "Der Zugang zum TP-Managementportal ist nicht möglich."); } });
