@@ -153,3 +153,13 @@ dialog{border:0;border-radius:15px;padding:0;width:min(760px,94vw);box-shadow:0 
 .chat-head-copy{min-width:0;flex:1}.chat-head-menu{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 11px;min-height:34px;border:1px solid #d7e0e8;border-radius:9px;background:#fff;color:var(--text);font-size:12px;line-height:1.2;white-space:nowrap;cursor:pointer}.chat-head-menu:hover,.chat-head-menu:focus-visible{background:#f2f6f9;border-color:#b7c6d4}.chat-head-menu span[aria-hidden="true"]{font-size:15px}.chat-bubble-wrap{max-width:min(72%,680px);display:flex;align-items:center;gap:5px}.chat-bubble-wrap .chat-bubble{max-width:100%}.chat-message-row.mine .chat-bubble-wrap{flex-direction:row}.chat-message-actions{display:flex;gap:3px;opacity:0;transition:opacity .15s}.chat-message-row:hover .chat-message-actions,.chat-message-actions:focus-within{opacity:1}.chat-message-actions button{width:27px;height:27px;border:1px solid #d7e0e8;border-radius:7px;background:#fff;cursor:pointer;font-size:12px}.chat-message-actions button:hover{background:#f2f6f9}.chat-edited{font-size:7.5px;color:#8a96a1;font-style:italic}.chat-deleted{background:#f4f5f6!important;border-style:dashed!important;box-shadow:none}.chat-deleted-text{font-size:10.5px;color:#7c8790;font-style:italic;padding:2px 1px}
 @media(max-width:900px){.chat-bubble-wrap{max-width:85%}.chat-message-actions{opacity:1}}
 @media(max-width:700px){.chat-bubble-wrap{max-width:90%}}
+
+/* V3.6.5 – Zentrale Ladeanzeige */
+.portal-loading-overlay{position:fixed;z-index:20000;inset:0;display:grid;place-items:center;padding:20px;background:rgba(18,34,48,.2);backdrop-filter:blur(1.5px)}
+.portal-loading-overlay[hidden]{display:none}
+.portal-loading-card{display:flex;align-items:center;gap:16px;min-width:min(360px,calc(100vw - 40px));box-sizing:border-box;padding:20px 22px;border:1px solid rgba(255,255,255,.72);border-radius:15px;background:rgba(255,255,255,.97);box-shadow:0 18px 48px rgba(22,44,62,.2);color:var(--text)}
+.portal-loading-card strong,.portal-loading-card span{display:block}.portal-loading-card strong{font-size:13px;line-height:1.35}.portal-loading-card div>span{margin-top:4px;color:var(--muted);font-size:10.5px}
+.portal-loading-spinner{width:31px;height:31px;flex:0 0 31px;border:3px solid #dce7ef;border-top-color:var(--primary);border-radius:50%;animation:portal-loading-spin .8s linear infinite}
+@keyframes portal-loading-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.portal-loading-spinner{animation-duration:1.8s}}
+@media(max-width:480px){.portal-loading-card{min-width:0;width:100%;padding:17px 18px}}
