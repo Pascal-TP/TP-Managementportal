@@ -153,14 +153,3 @@ dialog{border:0;border-radius:15px;padding:0;width:min(760px,94vw);box-shadow:0 
 .chat-head-copy{min-width:0;flex:1}.chat-head-menu{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 11px;min-height:34px;border:1px solid #d7e0e8;border-radius:9px;background:#fff;color:var(--text);font-size:12px;line-height:1.2;white-space:nowrap;cursor:pointer}.chat-head-menu:hover,.chat-head-menu:focus-visible{background:#f2f6f9;border-color:#b7c6d4}.chat-head-menu span[aria-hidden="true"]{font-size:15px}.chat-bubble-wrap{max-width:min(72%,680px);display:flex;align-items:center;gap:5px}.chat-bubble-wrap .chat-bubble{max-width:100%}.chat-message-row.mine .chat-bubble-wrap{flex-direction:row}.chat-message-actions{display:flex;gap:3px;opacity:0;transition:opacity .15s}.chat-message-row:hover .chat-message-actions,.chat-message-actions:focus-within{opacity:1}.chat-message-actions button{width:27px;height:27px;border:1px solid #d7e0e8;border-radius:7px;background:#fff;cursor:pointer;font-size:12px}.chat-message-actions button:hover{background:#f2f6f9}.chat-edited{font-size:7.5px;color:#8a96a1;font-style:italic}.chat-deleted{background:#f4f5f6!important;border-style:dashed!important;box-shadow:none}.chat-deleted-text{font-size:10.5px;color:#7c8790;font-style:italic;padding:2px 1px}
 @media(max-width:900px){.chat-bubble-wrap{max-width:85%}.chat-message-actions{opacity:1}}
 @media(max-width:700px){.chat-bubble-wrap{max-width:90%}}
-
-/* V3.6.5 – zentrale, nicht blockierende Ladeanzeige */
-#tp-loading-indicator[hidden]{display:none!important}
-#tp-loading-indicator{position:fixed;inset:0;z-index:9000;display:grid;place-items:center;pointer-events:none;background:rgba(244,248,251,.35)}
-.tp-loading-card{width:min(330px,calc(100vw - 40px));padding:24px 26px;background:#fff;border:1px solid #dbe5ee;border-radius:15px;box-shadow:0 14px 42px rgba(20,47,70,.18);text-align:center;display:grid;justify-items:center;gap:10px;color:#173653}
-.tp-loading-card strong{font-size:14px}.tp-loading-card small{font-size:11px;color:#667b8e}
-.tp-loading-spinner{width:33px;height:33px;border:3px solid #dbe7f0;border-top-color:#315b7d;border-radius:50%;animation:tp-spin .8s linear infinite}
-.tp-loading-track{height:5px;width:100%;background:#e6edf3;border-radius:9px;overflow:hidden;position:relative}
-.tp-loading-track span{position:absolute;left:-35%;width:35%;height:100%;background:#315b7d;border-radius:9px;animation:tp-progress 1.4s ease-in-out infinite}
-@keyframes tp-spin{to{transform:rotate(360deg)}}@keyframes tp-progress{to{left:100%}}
-@media(prefers-reduced-motion:reduce){.tp-loading-spinner,.tp-loading-track span{animation-duration:3s}}
