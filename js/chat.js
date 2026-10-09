@@ -1,5 +1,6 @@
 import { portalCall, fileToBase64 } from "./document-store.js";
 import { beginPortalLoading, endPortalLoading } from "./loading-indicator.js";
+import { auth } from "./firebase.js";
 
 let ctx = null;
 let conversations = [];
@@ -8,6 +9,10 @@ let pollTimer = null;
 let lastMessageSignature = "";
 let unreadCallback = null;
 let pendingAttachment = null;
+let conversationResultCache = null;
+let conversationResultAt = 0;
+let conversationRequest = null;
+let conversationCacheUid = "";
 
 function esc(s=""){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[m]);}
 function fmt(v){if(!v)return "";const d=new Date(v);return Number.isNaN(d.getTime())?"":d.toLocaleString("de-DE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});}
@@ -21,8 +26,19 @@ export function stopChatModule(){if(pollTimer){clearInterval(pollTimer);pollTime
 export function setChatUnreadCallback(fn){unreadCallback=fn;}
 
 export async function getChatUnreadCount(){
-  try{const r=await portalCall("listManagementPortalChats");return Number(r.unreadCount||0);}catch(e){console.warn("Chat-Zähler nicht verfügbar",e);return 0;}
+  try{const r=await fetchConversations(0);return Number(r.unreadCount||0);}catch(e){console.warn("Chat-Zähler nicht verfügbar",e);return 0;}
 }
+
+async function fetchConversations(maxAgeMs=0){
+  const uid=String(auth.currentUser?.uid||"");
+  if(uid!==conversationCacheUid){conversationResultCache=null;conversationResultAt=0;conversationRequest=null;conversationCacheUid=uid;}
+  if(conversationResultCache&&Date.now()-conversationResultAt<=maxAgeMs)return conversationResultCache;
+  if(conversationRequest)return conversationRequest;
+  conversationRequest=portalCall("listManagementPortalChats").then(r=>{conversationResultCache=r;conversationResultAt=Date.now();return r;}).finally(()=>{conversationRequest=null;});
+  return conversationRequest;
+}
+
+function conversationRevision(c){return String(c?.updatedAt||c?.lastMessageAt||c?.createdAt||"");}
 
 export async function renderChatModule(options){
   stopChatModule(); ctx=options;
@@ -35,11 +51,12 @@ export async function renderChatModule(options){
 
 async function refreshConversations(initial=false){
   if(!ctx)return;
-  const r=await portalCall("listManagementPortalChats");
+  const previousActive=conversations.find(x=>x.id===activeId);
+  const r=await fetchConversations(initial?5000:0);
   conversations=Array.isArray(r.conversations)?r.conversations:[];
   unreadCallback?.(Number(r.unreadCount||0));
   if(initial){activeId=activeId||conversations[0]?.id||"";renderShell(); if(activeId)await loadMessages(true);}
-  else {renderConversationList(); if(activeId)await loadMessages(false);}
+  else {renderConversationList();const currentActive=conversations.find(x=>x.id===activeId);if(activeId&&(!previousActive||!currentActive||conversationRevision(previousActive)!==conversationRevision(currentActive)||currentActive.unread))await loadMessages(false);}
 }
 
 function renderShell(){

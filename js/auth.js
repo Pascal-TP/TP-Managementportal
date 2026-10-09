@@ -7,6 +7,20 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { collection, doc, getDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+let portalDirectoryPromise = null;
+
+async function loadPortalDirectory() {
+  if (!portalDirectoryPromise) {
+    portalDirectoryPromise = getDocs(collection(db, "managementPortalUsers"))
+      .then(snap => snap.docs.map(d => ({ id: d.id, ...(d.data() || {}) })))
+      .catch(err => {
+        portalDirectoryPromise = null;
+        throw err;
+      });
+  }
+  return portalDirectoryPromise;
+}
+
 export const ROLE_LABELS = {
   employee: "Mitarbeiter",
   supervisor: "Vorgesetzter",
@@ -65,9 +79,8 @@ export function observeAuth(callback) {
 
 export async function loadQmUser() {
   try {
-    const snap = await getDocs(collection(db, "managementPortalUsers"));
-    const hit = snap.docs.find(d => {
-      const v = d.data() || {};
+    const users = await loadPortalDirectory();
+    const hit = users.find(v => {
       const name = String(v.name || "").trim().toLowerCase();
       const username = String(v.username || "").trim().toLowerCase();
       const email = String(v.email || "").trim().toLowerCase();
@@ -75,8 +88,7 @@ export async function loadQmUser() {
         (name === "qm" || username === "qm" || email === "qm@portal.local");
     });
     if (!hit) return null;
-    const v = hit.data() || {};
-    return { id: hit.id, name: String(v.name || v.email || "QM").trim(), email: v.email || "", role: v.role || "admin" };
+    return { id: hit.id, name: String(hit.name || hit.email || "QM").trim(), email: hit.email || "", role: hit.role || "admin" };
   } catch (err) {
     console.warn("QM-Benutzer konnte nicht aus dem Portalverzeichnis geladen werden:", err);
     return null;
@@ -91,14 +103,13 @@ export function canManagePortalDocuments(profile = {}) {
 export async function loadAssignableColleagues() {
   const result = new Map();
   try {
-    const snap = await getDocs(collection(db, "managementPortalUsers"));
-    snap.forEach(d => {
-      const v = d.data() || {};
+    const users = await loadPortalDirectory();
+    users.forEach(v => {
       if (v.active === false || v.managementPortalAccess !== true) return;
       const label = String(v.name || v.email || "").trim();
       if (!label) return;
-      result.set(d.id, {
-        id: d.id,
+      result.set(v.id, {
+        id: v.id,
         name: label,
         email: v.email || "",
         role: v.role || "employee",
