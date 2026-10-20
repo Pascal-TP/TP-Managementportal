@@ -13,6 +13,8 @@ let conversationResultCache = null;
 let conversationResultAt = 0;
 let conversationRequest = null;
 let conversationCacheUid = "";
+const CHAT_POLL_INTERVAL_MS = 30000;
+let visibilityHandler = null;
 
 function esc(s=""){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[m]);}
 function fmt(v){if(!v)return "";const d=new Date(v);return Number.isNaN(d.getTime())?"":d.toLocaleString("de-DE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});}
@@ -22,7 +24,25 @@ function displayName(c){if(c.type==="group")return c.title||"Gruppe";const other
 function subtitle(c){if(c.type==="group")return `${(c.memberIds||[]).length} Mitglieder`;const other=(c.members||[]).find(m=>String(m.uid)!==myUid());return other?.roleLabel||other?.email||"Direktnachricht";}
 function isUnread(c){return Boolean(c.unread);}
 
-export function stopChatModule(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;}ctx=null;activeId="";lastMessageSignature="";pendingAttachment=null;}
+function stopChatPolling(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;}}
+function startChatPolling(){
+  stopChatPolling();
+  if(!ctx||document.hidden)return;
+  pollTimer=setInterval(()=>{if(ctx&&!document.hidden)refreshConversations(false).catch(()=>{});},CHAT_POLL_INTERVAL_MS);
+}
+function removeVisibilityHandler(){if(visibilityHandler){document.removeEventListener("visibilitychange",visibilityHandler);visibilityHandler=null;}}
+function installVisibilityHandler(){
+  removeVisibilityHandler();
+  visibilityHandler=()=>{
+    if(!ctx)return;
+    if(document.hidden){stopChatPolling();return;}
+    refreshConversations(false).catch(()=>{});
+    startChatPolling();
+  };
+  document.addEventListener("visibilitychange",visibilityHandler);
+}
+
+export function stopChatModule(){stopChatPolling();removeVisibilityHandler();ctx=null;activeId="";lastMessageSignature="";pendingAttachment=null;}
 export function setChatUnreadCallback(fn){unreadCallback=fn;}
 
 export async function getChatUnreadCount(){
@@ -32,7 +52,7 @@ export async function getChatUnreadCount(){
 async function fetchConversations(maxAgeMs=0){
   const uid=String(auth.currentUser?.uid||"");
   if(uid!==conversationCacheUid){conversationResultCache=null;conversationResultAt=0;conversationRequest=null;conversationCacheUid=uid;}
-  if(conversationResultCache&&Date.now()-conversationResultAt<=maxAgeMs)return conversationResultCache;
+  if(maxAgeMs>0&&conversationResultCache&&Date.now()-conversationResultAt<=maxAgeMs)return conversationResultCache;
   if(conversationRequest)return conversationRequest;
   conversationRequest=portalCall("listManagementPortalChats").then(r=>{conversationResultCache=r;conversationResultAt=Date.now();return r;}).finally(()=>{conversationRequest=null;});
   return conversationRequest;
@@ -46,7 +66,8 @@ export async function renderChatModule(options){
   ctx.content.innerHTML=`<div class="chat-loading">Chat wird geladen …</div>`;
   const loadingId=beginPortalLoading("Chat wird geladen …");
   try{await refreshConversations(true);}finally{endPortalLoading(loadingId);}
-  pollTimer=setInterval(()=>{if(ctx)refreshConversations(false).catch(()=>{});},4000);
+  installVisibilityHandler();
+  startChatPolling();
 }
 
 async function refreshConversations(initial=false){
