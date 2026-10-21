@@ -6,13 +6,13 @@ import { getFunctions } from "https://www.gstatic.com/firebasejs/11.6.1/firebase
 // Gemeinsame Authentifizierung und Benutzerprofile des TP-Personalmanagements.
 // Die Fachdaten des TP-Managementportals werden später getrennt angebunden.
 export const firebaseConfig = {
-  apiKey: "AIzaSyBPeDOgKJXgMG-zaq2sPokbx0UHc0VQelA",
-  authDomain: "tp-personalmanagement.firebaseapp.com",
-  projectId: "tp-personalmanagement",
-  storageBucket: "tp-personalmanagement.firebasestorage.app",
-  messagingSenderId: "376587718209",
-  appId: "1:376587718209:web:0fc02350013715a0fac0c0",
-  measurementId: "G-2PQ85F671Q"
+  apiKey: "AIzaSyCcHI5sGR7sFwrWRpo2uQ3Plm0HpTvqr30",
+  authDomain: "kalkpro-4cc29.firebaseapp.com",
+  projectId: "kalkpro-4cc29",
+  storageBucket: "kalkpro-4cc29.firebasestorage.app",
+  messagingSenderId: "185447466021",
+  appId: "1:185447466021:web:c404fa27a051a5b8b52bcc",
+  measurementId: "G-GCR0LEGB1C"
 };
 
 // Derselbe App-Name wie im TP-Personalmanagement. Auf demselben Web-Origin
